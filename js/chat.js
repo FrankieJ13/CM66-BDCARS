@@ -292,7 +292,9 @@
       try {
         state.cars = await loadCsvCars(config.fallbackCsvUrl);
         els.status.textContent = `${state.cars.length} авто в демо-базе`;
-        addMessage("assistant", "<p>Основная таблица пока недоступна. Временно показываю демо-базу.</p>");
+        if (!initialQuery) {
+          addMessage("assistant", "<p>Основная таблица пока недоступна. Временно показываю демо-базу.</p>");
+        }
         runInitialQuery(initialQuery);
       } catch (fallbackError) {
         els.status.textContent = "CSV не загружен";
@@ -309,6 +311,7 @@
 
   function runInitialQuery(query) {
     if (!query) return;
+    els.window.innerHTML = "";
     els.input.value = query;
     addMessage("user", `<p>${escapeHtml(query)}</p>`);
     renderAssistantReply(query);
