@@ -1,9 +1,11 @@
 const SPREADSHEET_ID = '1Ad27O54xpAS4vcHPA9Ds4e4pyAMN7SLgz6w0kgo44iU';
 const SHEET_NAME = 'BD';
 const LOG_SHEET_NAME = 'sync_log';
+const BUFFER_SHEET_NAME = 'sync_buffer';
 const HEADERS = ['brand', 'model', 'title', 'year', 'price', 'city', 'mileage', 'transmission', 'url', 'updated_at'];
 const CATALOG_URL = 'https://crystal-motors.ru/avtomobili_s_probegom';
 const MAX_CATALOG_PAGES = 180;
+const PAGES_PER_RUN = 18;
 const REQUEST_PAUSE_MS = 450;
 const AUTO_REFRESH_INTERVAL_MINUTES = 90;
 const ASSISTANT_URL = 'https://frankiej13.github.io/CM66-BDCARS/';
@@ -14,6 +16,8 @@ function onOpen() {
     .addItem('Обновить базу сейчас', 'menuRefreshCatalog')
     .addItem('Настроить автообновление', 'menuSetupSync')
     .addSeparator()
+    .addItem('Сбросить прогресс обновления', 'menuResetSync')
+    .addSeparator()
     .addItem('Проверить парсер', 'menuTestParser')
     .addItem('Открыть ассистента', 'menuOpenAssistant')
     .addToUi();
@@ -21,7 +25,7 @@ function onOpen() {
 
 function menuRefreshCatalog() {
   refreshCrystalMotorsCatalog();
-  SpreadsheetApp.getUi().alert('Готово: база авто обновлена. Подробности смотрите во вкладке sync_log.');
+  SpreadsheetApp.getUi().alert('Готово: обработан очередной пакет страниц. Подробности смотрите во вкладке sync_log.');
 }
 
 function menuSetupSync() {
@@ -32,6 +36,11 @@ function menuSetupSync() {
 function menuTestParser() {
   const cars = testCrystalMotorsParser();
   SpreadsheetApp.getUi().alert(`Проверка завершена: найдено ${cars.length} авто на первой странице. Подробности смотрите во вкладке sync_log.`);
+}
+
+function menuResetSync() {
+  resetCatalogSyncProgress();
+  SpreadsheetApp.getUi().alert('Готово: прогресс обновления сброшен. Следующий запуск начнет каталог с первой страницы.');
 }
 
 function menuOpenAssistant() {
@@ -56,27 +65,42 @@ function setupAndRefreshCrystalMotorsSync() {
 
 function refreshCrystalMotorsCatalog() {
   try {
-    const sheet = getCarsSheet_();
-    const found = new Map();
+    const properties = PropertiesService.getScriptProperties();
+    const startPage = Number(properties.getProperty('next_page') || 1);
+    const existingCars = readBufferedCars_();
+    const found = new Map(existingCars.map((car) => [car.url, car]));
+    let nextPage = startPage;
+    let finished = false;
+    let pagesProcessed = 0;
 
-    for (let page = 1; page <= MAX_CATALOG_PAGES; page += 1) {
+    for (let page = startPage; page < startPage + PAGES_PER_RUN && page <= MAX_CATALOG_PAGES; page += 1) {
       const url = page === 1 ? CATALOG_URL : `${CATALOG_URL}/?PAGEN_1=${page}`;
       const cars = parseCatalogPage_(fetchText_(url), CATALOG_URL);
-      if (!cars.length) break;
+      if (!cars.length) {
+        finished = true;
+        break;
+      }
       cars.forEach((car) => found.set(car.url, car));
+      nextPage = page + 1;
+      pagesProcessed += 1;
       Utilities.sleep(REQUEST_PAUSE_MS);
     }
 
-    const rows = Array.from(found.values())
-      .sort((a, b) => String(a.city).localeCompare(String(b.city), 'ru') || Number(a.price) - Number(b.price))
-      .map((car) => HEADERS.map((header) => car[header] || ''));
+    if (nextPage > MAX_CATALOG_PAGES) finished = true;
 
-    sheet.clearContents();
-    sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
-    if (rows.length) sheet.getRange(2, 1, rows.length, HEADERS.length).setValues(rows);
-    sheet.autoResizeColumns(1, HEADERS.length);
-    PropertiesService.getScriptProperties().setProperty('last_refresh_at', String(Date.now()));
-    logSync_('refresh', 'OK', `${rows.length} cars written from full catalog`);
+    writeBufferedCars_(Array.from(found.values()));
+    properties.setProperty('next_page', String(nextPage));
+
+    if (!finished) {
+      logSync_('refresh_batch', 'CONTINUE', `Pages ${startPage}-${nextPage - 1} processed, ${found.size} cars buffered, next page ${nextPage}`);
+      return;
+    }
+
+    writeCarsToSheet_(Array.from(found.values()));
+    properties.setProperty('last_refresh_at', String(Date.now()));
+    properties.deleteProperty('next_page');
+    clearBufferedCars_();
+    logSync_('refresh', 'OK', `${found.size} cars written from full catalog in batches`);
   } catch (error) {
     logSync_('refresh', 'ERROR', error.stack || error.message);
     throw error;
@@ -92,6 +116,12 @@ function createCrystalMotorsTrigger() {
 
 function scheduledRefreshCrystalMotorsCatalog() {
   const properties = PropertiesService.getScriptProperties();
+  const hasActiveBatch = Boolean(properties.getProperty('next_page'));
+  if (hasActiveBatch) {
+    refreshCrystalMotorsCatalog();
+    return;
+  }
+
   const lastRefresh = Number(properties.getProperty('last_refresh_at') || 0);
   const ageMinutes = (Date.now() - lastRefresh) / 60000;
   if (lastRefresh && ageMinutes < AUTO_REFRESH_INTERVAL_MINUTES) {
@@ -99,6 +129,13 @@ function scheduledRefreshCrystalMotorsCatalog() {
     return;
   }
   refreshCrystalMotorsCatalog();
+}
+
+function resetCatalogSyncProgress() {
+  const properties = PropertiesService.getScriptProperties();
+  properties.deleteProperty('next_page');
+  clearBufferedCars_();
+  logSync_('reset', 'OK', 'Catalog sync progress cleared');
 }
 
 function testCrystalMotorsParser() {
@@ -113,6 +150,47 @@ function writeHeaders_() {
   sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
   sheet.setFrozenRows(1);
   sheet.autoResizeColumns(1, HEADERS.length);
+}
+
+function writeCarsToSheet_(cars) {
+  const sheet = getCarsSheet_();
+  const rows = cars
+    .sort((a, b) => String(a.city).localeCompare(String(b.city), 'ru') || Number(a.price) - Number(b.price))
+    .map((car) => HEADERS.map((header) => car[header] || ''));
+
+  sheet.clearContents();
+  sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
+  if (rows.length) sheet.getRange(2, 1, rows.length, HEADERS.length).setValues(rows);
+  sheet.autoResizeColumns(1, HEADERS.length);
+}
+
+function readBufferedCars_() {
+  const values = getBufferSheet_().getDataRange().getValues();
+  if (values.length < 2) return [];
+
+  const headers = values[0].map((value) => String(value).trim());
+  return values.slice(1).map((row) => {
+    const car = {};
+    headers.forEach((header, index) => {
+      car[header] = row[index];
+    });
+    return car;
+  }).filter((car) => car.url);
+}
+
+function writeBufferedCars_(cars) {
+  const sheet = getBufferSheet_();
+  const rows = cars.map((car) => HEADERS.map((header) => car[header] || ''));
+  sheet.clearContents();
+  sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
+  if (rows.length) sheet.getRange(2, 1, rows.length, HEADERS.length).setValues(rows);
+  sheet.hideSheet();
+}
+
+function clearBufferedCars_() {
+  const sheet = getBufferSheet_();
+  sheet.clearContents();
+  sheet.hideSheet();
 }
 
 function deleteExistingTriggers_(handlerName) {
@@ -137,6 +215,15 @@ function getLogSheet_() {
     sheet = spreadsheet.insertSheet(LOG_SHEET_NAME);
     sheet.getRange(1, 1, 1, 4).setValues([['timestamp', 'action', 'status', 'message']]);
     sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+function getBufferSheet_() {
+  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  let sheet = spreadsheet.getSheetByName(BUFFER_SHEET_NAME);
+  if (!sheet) {
+    sheet = spreadsheet.insertSheet(BUFFER_SHEET_NAME);
   }
   return sheet;
 }
