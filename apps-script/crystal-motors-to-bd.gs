@@ -78,6 +78,7 @@ function refreshCrystalMotorsCatalog() {
       const cars = fetchCatalogPage_(page);
       if (!cars.length) {
         finished = true;
+        nextPage = page;
         break;
       }
       cars.forEach((car) => found.set(car.url, car));
@@ -268,6 +269,7 @@ function fetchAjaxPageText_(page) {
   });
 
   const code = response.getResponseCode();
+  if (code === 404) return '';
   if (code < 200 || code >= 300) throw new Error(`HTTP ${code}: ${CATALOG_URL} ajax page ${page}`);
   return response.getContentText('UTF-8');
 }
