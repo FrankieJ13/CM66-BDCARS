@@ -95,6 +95,7 @@ function refreshCrystalMotorsCatalog() {
     properties.setProperty('next_page', String(nextPage));
 
     if (!finished) {
+      writeCarsToSheet_(Array.from(found.values()));
       logSync_('refresh_batch', 'CONTINUE', `Pages ${startPage}-${nextPage - 1} processed, ${found.size} cars buffered, next page ${nextPage}`);
       return;
     }
