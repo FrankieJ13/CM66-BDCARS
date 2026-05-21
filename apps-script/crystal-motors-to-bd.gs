@@ -4,6 +4,7 @@ const LOG_SHEET_NAME = 'sync_log';
 const HEADERS = ['brand', 'model', 'title', 'year', 'price', 'city', 'mileage', 'transmission', 'url', 'updated_at'];
 const MAX_PAGES_PER_CITY = 3;
 const REQUEST_PAUSE_MS = 1200;
+const ASSISTANT_URL = 'https://frankiej13.github.io/CM66-BDCARS/';
 
 const CITY_CATALOGS = [
   'https://crystal-motors.ru/avtomobili_s_probegom',
@@ -20,6 +21,40 @@ const CITY_CATALOGS = [
   'https://perm.crystal-motors.ru/avtomobili_s_probegom',
   'https://orenburg.crystal-motors.ru/avtomobili_s_probegom'
 ];
+
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('CM66 авто')
+    .addItem('Обновить базу сейчас', 'menuRefreshCatalog')
+    .addItem('Настроить автообновление', 'menuSetupSync')
+    .addSeparator()
+    .addItem('Проверить парсер', 'menuTestParser')
+    .addItem('Открыть ассистента', 'menuOpenAssistant')
+    .addToUi();
+}
+
+function menuRefreshCatalog() {
+  refreshCrystalMotorsCatalog();
+  SpreadsheetApp.getUi().alert('Готово: база авто обновлена. Подробности смотрите во вкладке sync_log.');
+}
+
+function menuSetupSync() {
+  setupCrystalMotorsSync();
+  SpreadsheetApp.getUi().alert('Готово: автообновление включено. База будет обновляться раз в 30 минут.');
+}
+
+function menuTestParser() {
+  const cars = testCrystalMotorsParser();
+  SpreadsheetApp.getUi().alert(`Проверка завершена: найдено ${cars.length} авто на первой странице. Подробности смотрите во вкладке sync_log.`);
+}
+
+function menuOpenAssistant() {
+  const html = HtmlService
+    .createHtmlOutput(`<script>window.open('${ASSISTANT_URL}', '_blank');google.script.host.close();</script>`)
+    .setWidth(120)
+    .setHeight(40);
+  SpreadsheetApp.getUi().showModalDialog(html, 'Открываем ассистента');
+}
 
 function setupCrystalMotorsSync() {
   writeHeaders_();
