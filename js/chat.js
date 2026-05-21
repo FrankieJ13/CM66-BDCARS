@@ -410,22 +410,35 @@
     return true;
   }
 
-  function getDatabaseFreshness() {
+  function getDatabaseFreshness(options = {}) {
     if (!state.cars.length) return "База пока не загружена.";
     const dates = state.cars
       .map((car) => Date.parse(car.updated_at || car.updatedAt || car.updatedat || ""))
       .filter(Number.isFinite);
 
     if (!dates.length) {
-      return `${state.cars.length} авто в базе, дата обновления в таблице не указана.`;
+      return options.compact
+        ? `${state.cars.length} авто`
+        : `${state.cars.length} авто в базе, дата обновления в таблице не указана.`;
     }
 
     const latest = new Date(Math.max(...dates));
+    if (options.compact) return `${formatCompactDate(latest)} · ${state.cars.length} авто`;
+
     const formatted = new Intl.DateTimeFormat("ru-RU", {
       dateStyle: "medium",
       timeStyle: "short"
     }).format(latest);
     return `База обновлялась: ${formatted}. Сейчас в базе ${state.cars.length} авто.`;
+  }
+
+  function formatCompactDate(date) {
+    return new Intl.DateTimeFormat("ru-RU", {
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit"
+    }).format(date).replace(",", "");
   }
 
   function handleFontSizeInput(query) {
@@ -501,7 +514,7 @@
     try {
       state.cars = await loadCsvCars(csvUrl);
       if (!state.cars.length) throw new Error("Каталог пуст");
-      els.status.textContent = getDatabaseFreshness();
+      els.status.textContent = getDatabaseFreshness({ compact: true });
       runInitialQuery(initialQuery);
     } catch (error) {
       if (!config.fallbackCsvUrl || csvFromUrl || !useDemoFallback) {
@@ -512,7 +525,7 @@
 
       try {
         state.cars = await loadCsvCars(config.fallbackCsvUrl);
-        els.status.textContent = `${state.cars.length} авто в демо-базе`;
+        els.status.textContent = `${state.cars.length} авто · демо`;
         if (!initialQuery) {
           addMessage("assistant", "<p>Основная таблица пока недоступна. Временно показываю демо-базу.</p>");
         }
