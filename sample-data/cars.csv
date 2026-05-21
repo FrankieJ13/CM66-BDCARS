@@ -1,0 +1,8 @@
+brand,model,title,year,price,city,mileage,transmission,url,updated_at
+ВАЗ (LADA),Vesta,ВАЗ (LADA) Vesta,2016,719000,Пермь,,Автомат,https://perm.crystal-motors.ru/avtomobili_s_probegom/lada/vesta,2026-05-21T09:00:00+05:00
+ВАЗ (LADA),Granta,ВАЗ (LADA) Granta,2020,719000,Пермь,,Механика,https://perm.crystal-motors.ru/avtomobili_s_probegom/lada/granta,2026-05-21T09:00:00+05:00
+Volkswagen,Tiguan,Volkswagen Tiguan,2020,2949000,Пермь,,Автомат,https://perm.crystal-motors.ru/avtomobili_s_probegom/volkswagen/tiguan,2026-05-21T09:00:00+05:00
+Volkswagen,Tiguan,Volkswagen Tiguan,2010,849000,Оренбург,,Механика,https://orenburg.crystal-motors.ru/avtomobili_s_probegom/volkswagen/tiguan,2026-05-21T09:00:00+05:00
+Toyota,Camry,Toyota Camry,2018,2199000,Пермь,,Автомат,https://perm.crystal-motors.ru/avtomobili_s_probegom/toyota/camry,2026-05-21T09:00:00+05:00
+Toyota,Camry,Toyota Camry,2014,1599000,Оренбург,,Автомат,https://orenburg.crystal-motors.ru/avtomobili_s_probegom/toyota/camry,2026-05-21T09:00:00+05:00
+KIA,Rio,KIA Rio,2019,1099000,Тюмень,,Автомат,https://tumen.crystal-motors.ru/avtomobili_s_probegom/kia/rio,2026-05-21T09:00:00+05:00

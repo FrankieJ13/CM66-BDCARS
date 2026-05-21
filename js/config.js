@@ -1,0 +1,6 @@
+window.AUTO_ASSISTANT_CONFIG = {
+  sheetCsvUrl: "https://docs.google.com/spreadsheets/d/1Ad27O54xpAS4vcHPA9Ds4e4pyAMN7SLgz6w0kgo44iU/export?format=csv&gid=0",
+  fallbackCsvUrl: "sample-data/cars.csv",
+  maxResults: 5,
+  defaultCatalogHost: "crystal-motors.ru"
+};

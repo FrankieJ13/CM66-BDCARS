@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Auto Search Assistant</title>
+    <link rel="stylesheet" href="css/chat.css">
+  </head>
+  <body>
+    <main class="chat-shell">
+      <header class="chat-header">
+        <div>
+          <p>Crystal Motors</p>
+          <h1>Ассистент поиска авто</h1>
+        </div>
+        <span id="catalogStatus">Загрузка каталога...</span>
+      </header>
+
+      <section class="chat-window" id="chatWindow" aria-live="polite">
+        <article class="message assistant">
+          <p>Напишите запрос клиента. Например: “фольц тигуан в перми автомат” или “лада веста до 900”.</p>
+        </article>
+      </section>
+
+      <form class="composer" id="chatForm">
+        <input
+          id="chatInput"
+          type="text"
+          value="фольц тигуан в перми автомат"
+          autocomplete="off"
+          placeholder="Что ищем?"
+        >
+        <button type="submit">Найти</button>
+      </form>
+    </main>
+
+    <script src="js/config.js"></script>
+    <script src="js/search-dictionary.js"></script>
+    <script src="js/chat.js"></script>
+  </body>
+</html>
