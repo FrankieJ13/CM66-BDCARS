@@ -92,6 +92,7 @@ input {
 
 .message.user {
   align-self: flex-end;
+  width: min(68%, 620px);
   background: var(--accent);
   color: #ffffff;
 }
