@@ -25,7 +25,12 @@ function setupCrystalMotorsSync() {
   writeHeaders_();
   deleteExistingTriggers_('refreshCrystalMotorsCatalog');
   createCrystalMotorsTrigger();
-  logSync_('setup', 'OK', 'Headers created, trigger installed');
+  logSync_('setup', 'OK', 'Headers created, trigger installed. Run refreshCrystalMotorsCatalog to fill BD now.');
+}
+
+function setupAndRefreshCrystalMotorsSync() {
+  setupCrystalMotorsSync();
+  refreshCrystalMotorsCatalog();
 }
 
 function refreshCrystalMotorsCatalog() {

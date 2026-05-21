@@ -68,15 +68,17 @@ apps-script/crystal-motors-to-bd.gs
 2. Перейдите в `Extensions -> Apps Script`.
 3. Удалите пустой код и вставьте содержимое `apps-script/crystal-motors-to-bd.gs`.
 4. Нажмите Save.
-5. В выпадающем списке функций выберите `setupCrystalMotorsSync`.
+5. В выпадающем списке функций выберите `setupAndRefreshCrystalMotorsSync`.
 6. Нажмите Run и выдайте права.
-7. Затем выберите `refreshCrystalMotorsCatalog` и запустите вручную первый раз.
+7. Дождитесь завершения выполнения.
 
 После этого:
 
 - вкладка `BD` наполнится строками авто;
 - вкладка `sync_log` покажет статус синхронизации или ошибку;
 - обновление будет идти раз в 30 минут.
+
+Если вы уже запускали `setupCrystalMotorsSync` и в `sync_log` есть только строка `setup / OK`, просто выберите функцию `refreshCrystalMotorsCatalog` и нажмите Run. Именно она наполняет `BD`.
 
 Для быстрой проверки парсера можно запустить функцию `testCrystalMotorsParser`: она запишет результат в `sync_log` и вернет первые найденные авто в Apps Script execution log.
 
