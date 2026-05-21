@@ -109,35 +109,36 @@ input {
 
 .result-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr));
+  grid-template-columns: 1fr;
   gap: 8px;
   margin-top: 12px;
 }
 
 .result-card {
   display: grid;
-  gap: 6px;
+  position: relative;
+  gap: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 10px;
+  padding: 12px 48px 12px 12px;
   background: var(--soft);
   min-width: 0;
 }
 
 .result-card.has-image {
-  grid-template-columns: minmax(0, 1fr) 76px;
+  grid-template-columns: minmax(0, 1fr) 198px;
   align-items: start;
 }
 
 .result-card-content {
   display: grid;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
 }
 
 .result-card-image {
-  width: 76px;
-  aspect-ratio: 4 / 3;
+  width: 198px;
+  height: 122px;
   border-radius: 8px;
   object-fit: cover;
   background: #d8e0e7;
@@ -145,34 +146,57 @@ input {
 
 .result-card h2 {
   margin: 0;
-  font-size: 15px;
+  font-size: 19px;
   line-height: 1.2;
 }
 
 .price {
-  font-size: 17px;
+  font-size: 28px;
+  line-height: 1.08;
   font-weight: 850;
 }
 
 .meta {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 16px;
   line-height: 1.35;
 }
 
 .specs {
   display: grid;
-  gap: 3px;
+  grid-template-columns: 1.1fr 1fr 0.8fr;
+  column-gap: 16px;
+  row-gap: 2px;
   margin: 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 15px;
   line-height: 1.25;
 }
 
-.specs div {
+.spec {
   display: flex;
   gap: 4px;
   min-width: 0;
+}
+
+.spec-кузов {
+  grid-column: 1 / 2;
+}
+
+.spec-мощн {
+  grid-column: 2 / 3;
+}
+
+.spec-двиг {
+  grid-column: 1 / 2;
+}
+
+.spec-привод {
+  grid-column: 2 / 3;
+}
+
+.spec-руль {
+  grid-column: 3 / 4;
 }
 
 .specs dt {
@@ -187,7 +211,29 @@ input {
   overflow-wrap: anywhere;
 }
 
-.result-card a {
+.result-card-link {
+  position: absolute;
+  right: 13px;
+  bottom: 13px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  color: #0b1118;
+  text-decoration: none;
+}
+
+.result-card-link svg {
+  width: 28px;
+  height: 28px;
+  fill: currentColor;
+}
+
+.result-card-link:hover {
+  color: var(--accent);
+}
+
+.result-card a:not(.result-card-link) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -200,6 +246,43 @@ input {
   text-decoration: none;
   font-size: 13px;
   font-weight: 800;
+}
+
+@media (max-width: 720px) {
+  .result-card {
+    padding-right: 42px;
+  }
+
+  .result-card.has-image {
+    grid-template-columns: minmax(0, 1fr) 116px;
+  }
+
+  .result-card-image {
+    width: 116px;
+    height: 84px;
+  }
+
+  .price {
+    font-size: 22px;
+  }
+
+  .meta,
+  .specs {
+    font-size: 13px;
+  }
+
+  .specs {
+    grid-template-columns: 1fr;
+  }
+
+  .spec,
+  .spec-кузов,
+  .spec-мощн,
+  .spec-двиг,
+  .spec-привод,
+  .spec-руль {
+    grid-column: auto;
+  }
 }
 
 .chips {

@@ -278,12 +278,13 @@
       const summary = [car.year, car.city, car.mileage && `${car.mileage} км`, car.transmission].filter(Boolean).join(" · ");
       const specs = [
         ["Кузов", car.body],
+        ["Мощн.", car.power],
         ["Двиг.", car.engine],
         ["Привод", car.drive],
-        ["Мощн.", car.power],
         ["Руль", car.wheel]
       ].filter((item) => item[1]);
       const image = getCarImage(car);
+      const url = getCarUrl(car);
       return `
         <article class="result-card ${image ? "has-image" : ""}">
           <div class="result-card-content">
@@ -291,9 +292,14 @@
             <div class="price">${escapeHtml(formatMoney(car.price))}</div>
             <div class="meta">${escapeHtml(summary || "детали не указаны")}</div>
             ${renderSpecs(specs)}
-            <a href="${escapeHtml(getCarUrl(car))}" target="_blank" rel="noopener">Ссылка</a>
           </div>
           ${image ? `<img class="result-card-image" src="${escapeHtml(image)}" alt="${escapeHtml(title)}" loading="lazy">` : ""}
+          <a class="result-card-link" href="${escapeHtml(url)}" target="_blank" rel="noopener" aria-label="Открыть авто">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M10.6 13.4a1 1 0 0 1 0-1.4l3.1-3.1a3 3 0 0 1 4.2 4.2l-3.1 3.1a3 3 0 0 1-4.2 0 1 1 0 0 1 1.4-1.4 1 1 0 0 0 1.4 0l3.1-3.1a1 1 0 0 0-1.4-1.4L12 13.4a1 1 0 0 1-1.4 0Z"/>
+              <path d="M3.9 20.1a5 5 0 0 1 0-7.1L7 9.9a5 5 0 0 1 7.1 0 1 1 0 1 1-1.4 1.4 3 3 0 0 0-4.2 0l-3.1 3.1a3 3 0 0 0 4.2 4.2l3.1-3.1a1 1 0 1 1 1.4 1.4L11 20.1a5 5 0 0 1-7.1 0Z"/>
+            </svg>
+          </a>
         </article>
       `;
     }).join("");
@@ -307,7 +313,7 @@
 
   function renderSpecs(specs) {
     if (!specs.length) return "";
-    return `<dl class="specs">${specs.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>`;
+    return `<dl class="specs">${specs.map(([label, value]) => `<div class="spec spec-${escapeHtml(label.toLowerCase().replace(/[^а-яa-z0-9]+/g, ""))}"><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>`;
   }
 
   function getCarImage(car) {
