@@ -495,6 +495,7 @@
     const params = new URLSearchParams(window.location.search);
     const csvFromUrl = params.get("csv");
     const initialQuery = params.get("q");
+    const useDemoFallback = params.get("demo") === "1";
     const csvUrl = csvFromUrl || config.sheetCsvUrl;
     els.status.textContent = "Загрузка каталога...";
     try {
@@ -503,9 +504,9 @@
       els.status.textContent = getDatabaseFreshness();
       runInitialQuery(initialQuery);
     } catch (error) {
-      if (!config.fallbackCsvUrl || csvFromUrl) {
+      if (!config.fallbackCsvUrl || csvFromUrl || !useDemoFallback) {
         els.status.textContent = "CSV не загружен";
-        addMessage("assistant", `<p>Не удалось загрузить каталог: ${escapeHtml(error.message)}</p>`);
+        addMessage("assistant", `<p>Основная BD не загрузилась: ${escapeHtml(error.message)}.</p><p>Проверьте, что таблица опубликована как CSV и в листе BD есть строки с авто.</p>`);
         return;
       }
 
@@ -526,7 +527,9 @@
   async function loadCsvCars(url) {
     const response = await fetch(url, { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return parseCsv(await response.text()).filter((car) => car.title || car.url);
+    const text = await response.text();
+    if (/^\s*</.test(text)) throw new Error("CSV-ссылка вернула HTML вместо таблицы");
+    return parseCsv(text).filter((car) => car.title || car.url);
   }
 
   function runInitialQuery(query) {
