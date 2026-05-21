@@ -4,7 +4,8 @@ const LOG_SHEET_NAME = 'sync_log';
 const BUFFER_SHEET_NAME = 'sync_buffer';
 const HEADERS = ['brand', 'model', 'title', 'year', 'price', 'city', 'mileage', 'transmission', 'url', 'updated_at'];
 const CATALOG_URL = 'https://crystal-motors.ru/avtomobili_s_probegom';
-const MAX_CATALOG_PAGES = 180;
+const MAX_CATALOG_PAGES = 160;
+const CATALOG_PAGE_SIZE = 24;
 const PAGES_PER_RUN = 18;
 const REQUEST_PAUSE_MS = 450;
 const AUTO_REFRESH_INTERVAL_MINUTES = 90;
@@ -74,8 +75,7 @@ function refreshCrystalMotorsCatalog() {
     let pagesProcessed = 0;
 
     for (let page = startPage; page < startPage + PAGES_PER_RUN && page <= MAX_CATALOG_PAGES; page += 1) {
-      const url = page === 1 ? CATALOG_URL : `${CATALOG_URL}/?PAGEN_1=${page}`;
-      const cars = parseCatalogPage_(fetchText_(url), CATALOG_URL);
+      const cars = fetchCatalogPage_(page);
       if (!cars.length) {
         finished = true;
         break;
@@ -86,6 +86,9 @@ function refreshCrystalMotorsCatalog() {
       Utilities.sleep(REQUEST_PAUSE_MS);
     }
 
+    if (pagesProcessed > 0 && found.size < CATALOG_PAGE_SIZE * (nextPage - 1) * 0.5) {
+      logSync_('refresh_batch', 'WARN', `Only ${found.size} unique cars after ${nextPage - 1} pages. Check source pagination if this repeats.`);
+    }
     if (nextPage > MAX_CATALOG_PAGES) finished = true;
 
     writeBufferedCars_(Array.from(found.values()));
@@ -139,9 +142,9 @@ function resetCatalogSyncProgress() {
 }
 
 function testCrystalMotorsParser() {
-  const url = CATALOG_URL;
-  const cars = parseCatalogPage_(fetchText_(url), url);
-  logSync_('test', cars.length ? 'OK' : 'EMPTY', `${cars.length} cars parsed from ${url}`);
+  const cars = fetchCatalogPage_(1);
+  const page2Cars = fetchCatalogPage_(2);
+  logSync_('test', cars.length && page2Cars.length ? 'OK' : 'EMPTY', `${cars.length} cars parsed from page 1, ${page2Cars.length} cars parsed from AJAX page 2`);
   return cars.slice(0, 5);
 }
 
@@ -232,6 +235,11 @@ function logSync_(action, status, message) {
   getLogSheet_().appendRow([new Date().toISOString(), action, status, String(message || '').slice(0, 1000)]);
 }
 
+function fetchCatalogPage_(page) {
+  if (page <= 1) return parseCatalogPage_(fetchText_(CATALOG_URL), CATALOG_URL);
+  return parseCatalogPage_(fetchAjaxPageText_(page), CATALOG_URL);
+}
+
 function fetchText_(url) {
   const response = UrlFetchApp.fetch(url, {
     muteHttpExceptions: true,
@@ -241,6 +249,25 @@ function fetchText_(url) {
 
   const code = response.getResponseCode();
   if (code < 200 || code >= 300) throw new Error(`HTTP ${code}: ${url}`);
+  return response.getContentText('UTF-8');
+}
+
+function fetchAjaxPageText_(page) {
+  const response = UrlFetchApp.fetch(CATALOG_URL, {
+    method: 'post',
+    payload: `ajax=true&page=${page}`,
+    contentType: 'application/x-www-form-urlencoded; charset=UTF-8',
+    muteHttpExceptions: true,
+    followRedirects: true,
+    headers: {
+      'User-Agent': 'Mozilla/5.0 CM66-BDCARS inventory sync',
+      'X-Requested-With': 'XMLHttpRequest',
+      'Referer': CATALOG_URL
+    }
+  });
+
+  const code = response.getResponseCode();
+  if (code < 200 || code >= 300) throw new Error(`HTTP ${code}: ${CATALOG_URL} ajax page ${page}`);
   return response.getContentText('UTF-8');
 }
 

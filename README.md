@@ -82,7 +82,7 @@ apps-script/crystal-motors-to-bd.gs
 
 Если вы уже запускали `setupCrystalMotorsSync` и в `sync_log` есть только строка `setup / OK`, просто выберите функцию `refreshCrystalMotorsCatalog` и нажмите Run. Именно она наполняет `BD`.
 
-Полный refresh проходит основной каталог `https://crystal-motors.ru/avtomobili_s_probegom` по страницам пагинации до пустой страницы или до лимита `MAX_CATALOG_PAGES`.
+Полный refresh проходит основной каталог `https://crystal-motors.ru/avtomobili_s_probegom`: первую страницу берет обычным запросом, следующие страницы загружает через AJAX так же, как кнопка `Загрузить еще` на сайте. Остановка происходит на пустой странице или по лимиту `MAX_CATALOG_PAGES`.
 
 Если полный каталог не успевает собраться за один запуск Apps Script, скрипт работает пакетами:
 
