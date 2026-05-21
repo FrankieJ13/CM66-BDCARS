@@ -11,6 +11,8 @@ const DAY_INCREMENTAL_PAGES = 12;
 const DETAILS_PER_RUN = 40;
 const REQUEST_PAUSE_MS = 450;
 const NEXT_BATCH_DELAY_MS = 60 * 1000;
+const FETCH_RETRIES = 3;
+const FETCH_RETRY_PAUSE_MS = 1500;
 const DAYTIME_START_HOUR = 8;
 const DAYTIME_END_HOUR = 21;
 const NIGHTLY_FULL_REFRESH_HOUR = 21;
@@ -183,6 +185,11 @@ function refreshCrystalMotorsCatalog() {
     logSync_('refresh', 'OK', `${found.size} cars written from full catalog in batches`);
   } catch (error) {
     logSync_('refresh', 'ERROR', error.stack || error.message);
+    if (PropertiesService.getScriptProperties().getProperty('next_page')) {
+      scheduleNextCatalogBatch_();
+      logSync_('refresh_batch', 'RETRY', `Catalog batch failed, retry scheduled from page ${PropertiesService.getScriptProperties().getProperty('next_page')}`);
+      return;
+    }
     throw error;
   }
 }
@@ -583,7 +590,7 @@ function fetchCatalogPage_(page) {
 }
 
 function fetchText_(url) {
-  const response = UrlFetchApp.fetch(url, {
+  const response = fetchWithRetry_(url, {
     muteHttpExceptions: true,
     followRedirects: true,
     headers: { 'User-Agent': 'Mozilla/5.0 CM66-BDCARS inventory sync' }
@@ -595,7 +602,7 @@ function fetchText_(url) {
 }
 
 function fetchAjaxPageText_(page) {
-  const response = UrlFetchApp.fetch(CATALOG_URL, {
+  const response = fetchWithRetry_(CATALOG_URL, {
     method: 'post',
     payload: `ajax=true&page=${page}`,
     contentType: 'application/x-www-form-urlencoded; charset=UTF-8',
@@ -612,6 +619,21 @@ function fetchAjaxPageText_(page) {
   if (code === 404) return '';
   if (code < 200 || code >= 300) throw new Error(`HTTP ${code}: ${CATALOG_URL} ajax page ${page}`);
   return response.getContentText('UTF-8');
+}
+
+function fetchWithRetry_(url, options) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= FETCH_RETRIES; attempt += 1) {
+    try {
+      return UrlFetchApp.fetch(url, options);
+    } catch (error) {
+      lastError = error;
+      if (attempt < FETCH_RETRIES) Utilities.sleep(FETCH_RETRY_PAUSE_MS * attempt);
+    }
+  }
+
+  throw lastError;
 }
 
 function parseCatalogPage_(html, baseUrl) {
