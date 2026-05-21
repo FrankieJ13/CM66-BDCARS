@@ -21,7 +21,8 @@ const ASSISTANT_URL = 'https://frankiej13.github.io/CM66-BDCARS/';
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('CM66 авто')
-    .addItem('Полное обновление базы', 'menuRefreshCatalog')
+    .addItem('Продолжить полное обновление', 'menuContinueCatalogRefresh')
+    .addItem('Начать полное обновление с нуля', 'menuStartFullCatalogRefresh')
     .addItem('Дневной апдейт без очистки', 'menuIncrementalRefreshCatalog')
     .addItem('Записать буфер в BD', 'menuFlushCatalogBuffer')
     .addItem('Дозаполнить фото и характеристики', 'menuEnrichCarDetails')
@@ -35,9 +36,18 @@ function onOpen() {
     .addToUi();
 }
 
-function menuRefreshCatalog() {
+function menuContinueCatalogRefresh() {
+  continueCatalogRefresh();
+  SpreadsheetApp.getUi().alert('Готово: обработан очередной пакет полного обновления. Подробности смотрите во вкладке sync_log.');
+}
+
+function menuStartFullCatalogRefresh() {
   startFullCatalogRefresh();
-  SpreadsheetApp.getUi().alert('Готово: обработан очередной пакет страниц. Подробности смотрите во вкладке sync_log.');
+  SpreadsheetApp.getUi().alert('Готово: полное обновление начато с первой страницы. Подробности смотрите во вкладке sync_log.');
+}
+
+function menuRefreshCatalog() {
+  continueCatalogRefresh();
 }
 
 function menuIncrementalRefreshCatalog() {
@@ -105,6 +115,17 @@ function startFullCatalogRefresh() {
   properties.setProperty('next_page', '1');
   properties.setProperty('sync_mode', 'full');
   clearBufferedCars_();
+  logSync_('refresh_start', 'OK', 'Full refresh started from page 1, buffer cleared');
+  refreshCrystalMotorsCatalog();
+}
+
+function continueCatalogRefresh() {
+  const properties = PropertiesService.getScriptProperties();
+  if (!properties.getProperty('next_page')) {
+    properties.setProperty('next_page', '1');
+    properties.setProperty('sync_mode', 'full');
+    logSync_('refresh_continue', 'START', 'No active full refresh found, started from page 1');
+  }
   refreshCrystalMotorsCatalog();
 }
 
@@ -283,6 +304,11 @@ function writeCarsToSheet_(cars) {
 
 function incrementalRefreshCrystalMotorsCatalog() {
   try {
+    if (PropertiesService.getScriptProperties().getProperty('next_page')) {
+      logSync_('incremental', 'SKIP', `Full refresh is active, next page ${PropertiesService.getScriptProperties().getProperty('next_page')}. Continue or reset full refresh first.`);
+      return;
+    }
+
     const existingByUrl = readCarsFromSheet_();
     const found = new Map(existingByUrl);
     let fetched = 0;

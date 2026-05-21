@@ -17,9 +17,14 @@
   box-sizing: border-box;
 }
 
+html {
+  height: 100%;
+}
+
 body {
   margin: 0;
-  min-height: 100vh;
+  height: 100%;
+  overflow: hidden;
   background: var(--bg);
   color: var(--ink);
 }
@@ -33,7 +38,9 @@ input {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   width: min(980px, 100%);
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
   margin: 0 auto;
   background: var(--panel);
   border-left: 1px solid var(--line);
@@ -43,6 +50,9 @@ input {
 
 .chat-header {
   display: flex;
+  position: sticky;
+  top: 0;
+  z-index: 3;
   justify-content: space-between;
   gap: 16px;
   align-items: flex-start;
@@ -76,9 +86,11 @@ input {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  min-height: 0;
   overflow: auto;
   padding: 22px 24px;
   background: linear-gradient(#f8fafc, #eef3f6);
+  overscroll-behavior: contain;
 }
 
 .message {
@@ -350,6 +362,7 @@ input {
 .composer {
   display: grid;
   position: relative;
+  z-index: 4;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
   padding: 16px;
