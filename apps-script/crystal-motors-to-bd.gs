@@ -10,6 +10,7 @@ const PAGES_PER_RUN = 18;
 const DAY_INCREMENTAL_PAGES = 12;
 const DETAILS_PER_RUN = 40;
 const REQUEST_PAUSE_MS = 450;
+const NEXT_BATCH_DELAY_MS = 60 * 1000;
 const DAYTIME_START_HOUR = 8;
 const DAYTIME_END_HOUR = 21;
 const NIGHTLY_FULL_REFRESH_HOUR = 21;
@@ -72,7 +73,7 @@ function menuRestartCarDetails() {
 
 function menuSetupSync() {
   setupCrystalMotorsSync();
-  SpreadsheetApp.getUi().alert('Готово: автообновление включено. Днем точечный апдейт каждые 3 часа, полный ночной проход в 21:00, проверка количества около 23:50.');
+  SpreadsheetApp.getUi().alert('Готово: автообновление включено. Полный проход сам продолжает пакеты примерно раз в минуту, днем точечный апдейт каждые 3 часа, полный ночной проход в 21:00, проверка количества около 23:50.');
 }
 
 function menuTestParser() {
@@ -97,6 +98,7 @@ function setupCrystalMotorsSync() {
   writeHeaders_();
   deleteExistingTriggers_([
     'scheduledRefreshCrystalMotorsCatalog',
+    'scheduledCarDetailsEnrichment',
     'scheduledDaytimeIncrementalCatalogSync',
     'scheduledNightlyFullCatalogRefresh',
     'scheduledNightlyCatalogCountCheck'
@@ -114,6 +116,8 @@ function startFullCatalogRefresh() {
   const properties = PropertiesService.getScriptProperties();
   properties.setProperty('next_page', '1');
   properties.setProperty('sync_mode', 'full');
+  properties.deleteProperty('details_next_row');
+  deleteExistingTriggers_(['scheduledRefreshCrystalMotorsCatalog', 'scheduledCarDetailsEnrichment']);
   clearBufferedCars_();
   logSync_('refresh_start', 'OK', 'Full refresh started from page 1, buffer cleared');
   refreshCrystalMotorsCatalog();
@@ -163,6 +167,7 @@ function refreshCrystalMotorsCatalog() {
     properties.setProperty('next_page', String(nextPage));
 
     if (!finished) {
+      scheduleNextCatalogBatch_();
       logSync_('refresh_batch', 'CONTINUE', `Pages ${startPage}-${nextPage - 1} processed, ${found.size} cars buffered, next page ${nextPage}`);
       return;
     }
@@ -173,6 +178,8 @@ function refreshCrystalMotorsCatalog() {
     properties.deleteProperty('next_page');
     properties.deleteProperty('sync_mode');
     clearBufferedCars_();
+    deleteExistingTriggers_('scheduledRefreshCrystalMotorsCatalog');
+    scheduleNextDetailsBatch_();
     logSync_('refresh', 'OK', `${found.size} cars written from full catalog in batches`);
   } catch (error) {
     logSync_('refresh', 'ERROR', error.stack || error.message);
@@ -192,10 +199,6 @@ function flushCatalogBufferToBD() {
 }
 
 function createCrystalMotorsTrigger() {
-  ScriptApp.newTrigger('scheduledRefreshCrystalMotorsCatalog')
-    .timeBased()
-    .everyMinutes(3)
-    .create();
   ScriptApp.newTrigger('scheduledDaytimeIncrementalCatalogSync')
     .timeBased()
     .everyHours(3)
@@ -227,6 +230,20 @@ function scheduledRefreshCrystalMotorsCatalog() {
     enrichCarDetailsBatch();
     return;
   }
+
+  deleteExistingTriggers_('scheduledRefreshCrystalMotorsCatalog');
+  logSync_('refresh_batch', 'SKIP', 'No active catalog or details batch');
+}
+
+function scheduledCarDetailsEnrichment() {
+  const hasActiveDetailsBatch = Boolean(PropertiesService.getScriptProperties().getProperty('details_next_row'));
+  if (hasActiveDetailsBatch) {
+    enrichCarDetailsBatch();
+    return;
+  }
+
+  deleteExistingTriggers_('scheduledCarDetailsEnrichment');
+  logSync_('details_batch', 'SKIP', 'No active details batch');
 }
 
 function scheduledDaytimeIncrementalCatalogSync() {
@@ -251,6 +268,7 @@ function scheduledNightlyCatalogCountCheck() {
 }
 
 function restartCarDetailsEnrichment() {
+  deleteExistingTriggers_('scheduledCarDetailsEnrichment');
   PropertiesService.getScriptProperties().setProperty('details_next_row', '2');
   enrichCarDetailsBatch();
 }
@@ -260,6 +278,7 @@ function resetCatalogSyncProgress() {
   properties.deleteProperty('next_page');
   properties.deleteProperty('sync_mode');
   properties.deleteProperty('details_next_row');
+  deleteExistingTriggers_(['scheduledRefreshCrystalMotorsCatalog', 'scheduledCarDetailsEnrichment']);
   clearBufferedCars_();
   logSync_('reset', 'OK', 'Catalog sync progress cleared');
 }
@@ -408,6 +427,7 @@ function enrichCarDetailsBatch() {
 
     if (!requests.length) {
       properties.deleteProperty('details_next_row');
+      deleteExistingTriggers_('scheduledCarDetailsEnrichment');
       logSync_('details', 'OK', 'All visible rows already have details');
       return;
     }
@@ -432,11 +452,13 @@ function enrichCarDetailsBatch() {
 
     if (rowNumber > updatedValues.length) {
       properties.deleteProperty('details_next_row');
+      deleteExistingTriggers_('scheduledCarDetailsEnrichment');
       logSync_('details', 'OK', `${updates.length} cars enriched, details pass finished`);
       return;
     }
 
     properties.setProperty('details_next_row', String(rowNumber));
+    scheduleNextDetailsBatch_();
     logSync_('details_batch', 'CONTINUE', `${updates.length} cars enriched, next row ${rowNumber}`);
   } catch (error) {
     logSync_('details', 'ERROR', error.stack || error.message);
@@ -497,6 +519,22 @@ function clearBufferedCars_() {
   const sheet = getBufferSheet_();
   sheet.clearContents();
   sheet.hideSheet();
+}
+
+function scheduleNextCatalogBatch_() {
+  deleteExistingTriggers_('scheduledRefreshCrystalMotorsCatalog');
+  ScriptApp.newTrigger('scheduledRefreshCrystalMotorsCatalog')
+    .timeBased()
+    .after(NEXT_BATCH_DELAY_MS)
+    .create();
+}
+
+function scheduleNextDetailsBatch_() {
+  deleteExistingTriggers_('scheduledCarDetailsEnrichment');
+  ScriptApp.newTrigger('scheduledCarDetailsEnrichment')
+    .timeBased()
+    .after(NEXT_BATCH_DELAY_MS)
+    .create();
 }
 
 function deleteExistingTriggers_(handlerNames) {
@@ -688,7 +726,33 @@ function parseCarDetailPage_(html) {
     if (key && value) details[key] = value;
   }
 
+  const textDetails = parseCarDetailText_(html);
+  Object.keys(textDetails).forEach((key) => {
+    if (!details[key] && textDetails[key]) details[key] = textDetails[key];
+  });
+
   return details;
+}
+
+function parseCarDetailText_(html) {
+  const text = cleanText_(stripTags_(html));
+  const labels = ['Год выпуска', 'Пробег', 'Кузов', 'Двигатель', 'Привод', 'Мощность', 'КПП', 'Руль', 'Один владелец', 'Скидка', 'Описание', 'Комплектация', 'Где находится авто'];
+  const labelPattern = labels.map(escapeRegExp_).join('|');
+  const read = (label) => {
+    const pattern = new RegExp(`${escapeRegExp_(label)}\\s+([\\s\\S]*?)(?=\\s+(?:${labelPattern})\\s+|$)`, 'i');
+    const match = text.match(pattern);
+    return match ? cleanText_(match[1]) : '';
+  };
+
+  return {
+    mileage: read('Пробег'),
+    body: read('Кузов'),
+    engine: read('Двигатель'),
+    drive: read('Привод'),
+    power: read('Мощность'),
+    transmission: read('КПП'),
+    wheel: read('Руль')
+  };
 }
 
 function extractProductIdFromHtml_(html) {
