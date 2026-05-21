@@ -69,7 +69,7 @@
     row.push(cell);
     if (row.some(Boolean)) rows.push(row);
 
-    const headers = (rows.shift() || []).map(normalizeText);
+    const headers = (rows.shift() || []).map(normalizeHeader);
     return rows.map((cells) => {
       const record = {};
       headers.forEach((header, index) => {
@@ -79,6 +79,13 @@
       record.year = Number(record.year) || "";
       return record;
     });
+  }
+
+  function normalizeHeader(value) {
+    return String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "_");
   }
 
   function parseMoney(value) {
@@ -183,7 +190,7 @@
   }
 
   function carSearchText(car) {
-    const base = normalizeText([car.brand, car.model, car.title, car.city, car.transmission].join(" "));
+    const base = normalizeText([car.brand, car.model, car.title, car.city, car.mileage, car.body, car.engine, car.drive, car.power, car.transmission, car.wheel].join(" "));
     const extra = [];
     for (const [alias, entry] of aliasIndex.entries()) {
       if (base.includes(alias)) extra.push(entry.name, entry.slug, entry.host, ...entry.variants);
@@ -268,13 +275,25 @@
 
     const cards = cars.map((car) => {
       const title = car.title || `${car.brand || ""} ${car.model || ""}`.trim() || "Автомобиль";
-      const details = [car.year, car.city, car.transmission].filter(Boolean).join(" · ");
+      const summary = [car.year, car.city, car.mileage && `${car.mileage} км`, car.transmission].filter(Boolean).join(" · ");
+      const specs = [
+        ["Кузов", car.body],
+        ["Двиг.", car.engine],
+        ["Привод", car.drive],
+        ["Мощн.", car.power],
+        ["Руль", car.wheel]
+      ].filter((item) => item[1]);
+      const image = getCarImage(car);
       return `
-        <article class="result-card">
-          <h2>${escapeHtml(title)}</h2>
-          <div class="price">${escapeHtml(formatMoney(car.price))}</div>
-          <div class="meta">${escapeHtml(details || "детали не указаны")}</div>
-          <a href="${escapeHtml(getCarUrl(car))}" target="_blank" rel="noopener">Ссылка</a>
+        <article class="result-card ${image ? "has-image" : ""}">
+          <div class="result-card-content">
+            <h2>${escapeHtml(title)}</h2>
+            <div class="price">${escapeHtml(formatMoney(car.price))}</div>
+            <div class="meta">${escapeHtml(summary || "детали не указаны")}</div>
+            ${renderSpecs(specs)}
+            <a href="${escapeHtml(getCarUrl(car))}" target="_blank" rel="noopener">Ссылка</a>
+          </div>
+          ${image ? `<img class="result-card-image" src="${escapeHtml(image)}" alt="${escapeHtml(title)}" loading="lazy">` : ""}
         </article>
       `;
     }).join("");
@@ -284,6 +303,16 @@
 
   function renderChips(chips) {
     return chips.length ? `<div class="chips">${chips.join("")}</div>` : "";
+  }
+
+  function renderSpecs(specs) {
+    if (!specs.length) return "";
+    return `<dl class="specs">${specs.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>`;
+  }
+
+  function getCarImage(car) {
+    const url = String(car.image_url || car.image || car.photo || "").trim();
+    return /^https?:\/\//i.test(url) ? url : "";
   }
 
   function escapeHtml(value) {

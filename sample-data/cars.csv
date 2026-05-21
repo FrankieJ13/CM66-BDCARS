@@ -1,8 +1,8 @@
-brand,model,title,year,price,city,mileage,transmission,url,updated_at
-ВАЗ (LADA),Vesta,ВАЗ (LADA) Vesta,2016,719000,Пермь,,Автомат,https://perm.crystal-motors.ru/avtomobili_s_probegom/lada/vesta,2026-05-21T09:00:00+05:00
-ВАЗ (LADA),Granta,ВАЗ (LADA) Granta,2020,719000,Пермь,,Механика,https://perm.crystal-motors.ru/avtomobili_s_probegom/lada/granta,2026-05-21T09:00:00+05:00
-Volkswagen,Tiguan,Volkswagen Tiguan,2020,2949000,Пермь,,Автомат,https://perm.crystal-motors.ru/avtomobili_s_probegom/volkswagen/tiguan,2026-05-21T09:00:00+05:00
-Volkswagen,Tiguan,Volkswagen Tiguan,2010,849000,Оренбург,,Механика,https://orenburg.crystal-motors.ru/avtomobili_s_probegom/volkswagen/tiguan,2026-05-21T09:00:00+05:00
-Toyota,Camry,Toyota Camry,2018,2199000,Пермь,,Автомат,https://perm.crystal-motors.ru/avtomobili_s_probegom/toyota/camry,2026-05-21T09:00:00+05:00
-Toyota,Camry,Toyota Camry,2014,1599000,Оренбург,,Автомат,https://orenburg.crystal-motors.ru/avtomobili_s_probegom/toyota/camry,2026-05-21T09:00:00+05:00
-KIA,Rio,KIA Rio,2019,1099000,Тюмень,,Автомат,https://tumen.crystal-motors.ru/avtomobili_s_probegom/kia/rio,2026-05-21T09:00:00+05:00
+brand,model,title,year,price,city,mileage,body,engine,drive,power,transmission,wheel,image_url,url,updated_at
+ВАЗ (LADA),Vesta,ВАЗ (LADA) Vesta,2016,719000,Пермь,126000,"Седан, 4","1.6 л, бензин",Передний,106 л.с.,Автомат,Левый,https://content-auto.ru/images/114321/8b75edc1a70e171601a23bf33289fd6b.webp,https://perm.crystal-motors.ru/avtomobili_s_probegom/lada/vesta,2026-05-21T09:00:00+05:00
+ВАЗ (LADA),Granta,ВАЗ (LADA) Granta,2020,719000,Пермь,82000,"Седан, 4","1.6 л, бензин",Передний,87 л.с.,Механика,Левый,https://content-auto.ru/images/114317/c7db6c0d2bed55b998be22054923eddb.webp,https://perm.crystal-motors.ru/avtomobili_s_probegom/lada/granta,2026-05-21T09:00:00+05:00
+Volkswagen,Tiguan,Volkswagen Tiguan,2020,2949000,Пермь,61000,"Кроссовер, 5","2.0 л, бензин",Полный,180 л.с.,Автомат,Левый,https://content-auto.ru/images/112480/b3e7a814ba1e9b824053b4cd83719ba9.webp,https://perm.crystal-motors.ru/avtomobili_s_probegom/volkswagen/tiguan,2026-05-21T09:00:00+05:00
+Volkswagen,Tiguan,Volkswagen Tiguan,2010,849000,Оренбург,178000,"Кроссовер, 5","1.4 л, бензин",Передний,150 л.с.,Механика,Левый,https://content-auto.ru/images/114299/120f3d1d33fb8de991941e50d9f323b6.webp,https://orenburg.crystal-motors.ru/avtomobili_s_probegom/volkswagen/tiguan,2026-05-21T09:00:00+05:00
+Toyota,Camry,Toyota Camry,2018,2199000,Пермь,94000,"Седан, 4","2.5 л, бензин",Передний,181 л.с.,Автомат,Левый,https://content-auto.ru/images/114298/81baa91207659d763c3f4d1b726cfe4e.webp,https://perm.crystal-motors.ru/avtomobili_s_probegom/toyota/camry,2026-05-21T09:00:00+05:00
+Toyota,Camry,Toyota Camry,2014,1599000,Оренбург,142000,"Седан, 4","2.5 л, бензин",Передний,181 л.с.,Автомат,Левый,https://content-auto.ru/images/114310/a21702007a28adbbd55d19234075dcdb.webp,https://orenburg.crystal-motors.ru/avtomobili_s_probegom/toyota/camry,2026-05-21T09:00:00+05:00
+KIA,Rio,KIA Rio,2019,1099000,Тюмень,103000,"Седан, 4","1.6 л, бензин",Передний,123 л.с.,Автомат,Левый,https://content-auto.ru/images/114313/9136cb43383688505c8c7194e12d7593.webp,https://tumen.crystal-motors.ru/avtomobili_s_probegom/kia/rio,2026-05-21T09:00:00+05:00

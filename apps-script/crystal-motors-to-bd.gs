@@ -2,11 +2,12 @@ const SPREADSHEET_ID = '1Ad27O54xpAS4vcHPA9Ds4e4pyAMN7SLgz6w0kgo44iU';
 const SHEET_NAME = 'BD';
 const LOG_SHEET_NAME = 'sync_log';
 const BUFFER_SHEET_NAME = 'sync_buffer';
-const HEADERS = ['brand', 'model', 'title', 'year', 'price', 'city', 'mileage', 'transmission', 'url', 'updated_at'];
+const HEADERS = ['brand', 'model', 'title', 'year', 'price', 'city', 'mileage', 'body', 'engine', 'drive', 'power', 'transmission', 'wheel', 'image_url', 'url', 'updated_at'];
 const CATALOG_URL = 'https://crystal-motors.ru/avtomobili_s_probegom';
 const MAX_CATALOG_PAGES = 160;
 const CATALOG_PAGE_SIZE = 24;
 const PAGES_PER_RUN = 18;
+const DETAILS_PER_RUN = 40;
 const REQUEST_PAUSE_MS = 450;
 const AUTO_REFRESH_INTERVAL_MINUTES = 90;
 const ASSISTANT_URL = 'https://frankiej13.github.io/CM66-BDCARS/';
@@ -15,6 +16,7 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('CM66 авто')
     .addItem('Обновить базу сейчас', 'menuRefreshCatalog')
+    .addItem('Дозаполнить фото и характеристики', 'menuEnrichCarDetails')
     .addItem('Настроить автообновление', 'menuSetupSync')
     .addSeparator()
     .addItem('Сбросить прогресс обновления', 'menuResetSync')
@@ -27,6 +29,11 @@ function onOpen() {
 function menuRefreshCatalog() {
   refreshCrystalMotorsCatalog();
   SpreadsheetApp.getUi().alert('Готово: обработан очередной пакет страниц. Подробности смотрите во вкладке sync_log.');
+}
+
+function menuEnrichCarDetails() {
+  enrichCarDetailsBatch();
+  SpreadsheetApp.getUi().alert('Готово: обработан очередной пакет карточек авто. Подробности смотрите во вкладке sync_log.');
 }
 
 function menuSetupSync() {
@@ -81,7 +88,7 @@ function refreshCrystalMotorsCatalog() {
         nextPage = page;
         break;
       }
-      cars.forEach((car) => found.set(car.url, car));
+      cars.forEach((car) => found.set(car.url, mergeCar_(found.get(car.url), car)));
       nextPage = page + 1;
       pagesProcessed += 1;
       Utilities.sleep(REQUEST_PAUSE_MS);
@@ -103,6 +110,7 @@ function refreshCrystalMotorsCatalog() {
 
     writeCarsToSheet_(Array.from(found.values()));
     properties.setProperty('last_refresh_at', String(Date.now()));
+    properties.setProperty('details_next_row', '2');
     properties.deleteProperty('next_page');
     clearBufferedCars_();
     logSync_('refresh', 'OK', `${found.size} cars written from full catalog in batches`);
@@ -127,6 +135,12 @@ function scheduledRefreshCrystalMotorsCatalog() {
     return;
   }
 
+  const hasActiveDetailsBatch = Boolean(properties.getProperty('details_next_row'));
+  if (hasActiveDetailsBatch) {
+    enrichCarDetailsBatch();
+    return;
+  }
+
   const lastRefresh = Number(properties.getProperty('last_refresh_at') || 0);
   const ageMinutes = (Date.now() - lastRefresh) / 60000;
   if (lastRefresh && ageMinutes < AUTO_REFRESH_INTERVAL_MINUTES) {
@@ -139,6 +153,7 @@ function scheduledRefreshCrystalMotorsCatalog() {
 function resetCatalogSyncProgress() {
   const properties = PropertiesService.getScriptProperties();
   properties.deleteProperty('next_page');
+  properties.deleteProperty('details_next_row');
   clearBufferedCars_();
   logSync_('reset', 'OK', 'Catalog sync progress cleared');
 }
@@ -159,14 +174,137 @@ function writeHeaders_() {
 
 function writeCarsToSheet_(cars) {
   const sheet = getCarsSheet_();
+  const existingByUrl = readCarsFromSheet_();
   const rows = cars
     .sort((a, b) => String(a.city).localeCompare(String(b.city), 'ru') || Number(a.price) - Number(b.price))
-    .map((car) => HEADERS.map((header) => car[header] || ''));
+    .map((car) => {
+      const merged = mergeCar_(existingByUrl.get(car.url), car);
+      return HEADERS.map((header) => merged[header] || '');
+    });
 
   sheet.clearContents();
   sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
   if (rows.length) sheet.getRange(2, 1, rows.length, HEADERS.length).setValues(rows);
   sheet.autoResizeColumns(1, HEADERS.length);
+}
+
+function readCarsFromSheet_() {
+  const sheet = getCarsSheet_();
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) return new Map();
+
+  const headers = values[0].map((value) => String(value).trim());
+  const urlIndex = headers.indexOf('url');
+  if (urlIndex < 0) return new Map();
+
+  const cars = new Map();
+  values.slice(1).forEach((row) => {
+    const car = {};
+    headers.forEach((header, index) => {
+      car[header] = row[index];
+    });
+    if (car.url) cars.set(car.url, car);
+  });
+  return cars;
+}
+
+function enrichCarDetailsBatch() {
+  try {
+    const sheet = getCarsSheet_();
+    const values = sheet.getDataRange().getValues();
+    if (values.length < 2) {
+      logSync_('details_batch', 'EMPTY', 'BD is empty');
+      return;
+    }
+
+    const headers = values[0].map((value) => String(value).trim());
+    ensureSheetHeaders_(sheet, headers);
+    const updatedValues = sheet.getDataRange().getValues();
+    const updatedHeaders = updatedValues[0].map((value) => String(value).trim());
+    const index = headerIndex_(updatedHeaders);
+    const properties = PropertiesService.getScriptProperties();
+    let rowNumber = Number(properties.getProperty('details_next_row') || 2);
+    const requests = [];
+    const rowNumbers = [];
+
+    while (rowNumber <= updatedValues.length && requests.length < DETAILS_PER_RUN) {
+      const row = updatedValues[rowNumber - 1];
+      const url = row[index.url];
+      const needsDetails = url && (!row[index.body] || !row[index.engine] || !row[index.drive] || !row[index.power] || !row[index.wheel] || !row[index.image_url]);
+      if (needsDetails) {
+        requests.push({
+          url,
+          muteHttpExceptions: true,
+          followRedirects: true,
+          headers: { 'User-Agent': 'Mozilla/5.0 CM66-BDCARS details sync' }
+        });
+        rowNumbers.push(rowNumber);
+      }
+      rowNumber += 1;
+    }
+
+    if (!requests.length) {
+      properties.deleteProperty('details_next_row');
+      logSync_('details', 'OK', 'All visible rows already have details');
+      return;
+    }
+
+    const responses = UrlFetchApp.fetchAll(requests);
+    const updates = [];
+    responses.forEach((response, responseIndex) => {
+      const code = response.getResponseCode();
+      if (code < 200 || code >= 300) return;
+      const details = parseCarDetailPage_(response.getContentText('UTF-8'));
+      const row = updatedValues[rowNumbers[responseIndex] - 1].slice();
+      Object.keys(details).forEach((key) => {
+        if (index[key] >= 0 && details[key]) row[index[key]] = details[key];
+      });
+      if (index.updated_at >= 0) row[index.updated_at] = new Date().toISOString();
+      updates.push({ rowNumber: rowNumbers[responseIndex], row });
+    });
+
+    updates.forEach((update) => {
+      sheet.getRange(update.rowNumber, 1, 1, updatedHeaders.length).setValues([update.row]);
+    });
+
+    if (rowNumber > updatedValues.length) {
+      properties.deleteProperty('details_next_row');
+      logSync_('details', 'OK', `${updates.length} cars enriched, details pass finished`);
+      return;
+    }
+
+    properties.setProperty('details_next_row', String(rowNumber));
+    logSync_('details_batch', 'CONTINUE', `${updates.length} cars enriched, next row ${rowNumber}`);
+  } catch (error) {
+    logSync_('details', 'ERROR', error.stack || error.message);
+    throw error;
+  }
+}
+
+function ensureSheetHeaders_(sheet, headers) {
+  const missing = HEADERS.filter((header) => !headers.includes(header));
+  if (!missing.length) return;
+
+  const values = sheet.getDataRange().getValues();
+  const normalizedRows = values.slice(1).map((row) => {
+    const record = {};
+    headers.forEach((header, index) => {
+      record[header] = row[index];
+    });
+    return HEADERS.map((header) => record[header] || '');
+  });
+
+  sheet.clearContents();
+  sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
+  if (normalizedRows.length) sheet.getRange(2, 1, normalizedRows.length, HEADERS.length).setValues(normalizedRows);
+}
+
+function headerIndex_(headers) {
+  const index = {};
+  HEADERS.forEach((header) => {
+    index[header] = headers.indexOf(header);
+  });
+  return index;
 }
 
 function readBufferedCars_() {
@@ -286,7 +424,7 @@ function parseCatalogPage_(html, baseUrl) {
     const text = cleanText_(stripTags_(match[2]));
     if (!/В наличии в/i.test(text) || !/Добавить в список избранного/i.test(text) || !/Купить в кредит/i.test(text)) continue;
 
-    const car = parseCardText_(text, href ? absoluteUrl_(href, baseUrl) : '');
+    const car = parseCardText_(text, href ? absoluteUrl_(href, baseUrl) : '', match[2], baseUrl);
     if (car.url && car.title && car.price) cars.push(car);
   }
 
@@ -295,7 +433,7 @@ function parseCatalogPage_(html, baseUrl) {
   return dedupeCars_(parseCardTextBlocks_(html));
 }
 
-function parseCardText_(text, url) {
+function parseCardText_(text, url, cardHtml, baseUrl) {
   const cityTitleMatch = text.match(new RegExp(`В наличии в\\s+(${getCityPattern_()})\\s+([\\s\\S]+?)\\s+Добавить в список избранного`, 'i'));
   const specsMatch = text.match(/(\d{4})\s*\/\s*([А-Яа-яЁёA-Za-z\s]+)/i);
   const priceMatch = text.match(/(\d[\d\s]{2,})\s*₽/);
@@ -311,7 +449,13 @@ function parseCardText_(text, url) {
     price: priceMatch ? onlyDigits_(priceMatch[1]) : '',
     city,
     mileage: '',
+    body: '',
+    engine: '',
+    drive: '',
+    power: '',
     transmission: specsMatch ? cleanText_(specsMatch[2]) : '',
+    wheel: '',
+    image_url: extractFirstImageUrl_(cardHtml, baseUrl),
     url: isUsefulCarUrl_(url) ? url : buildCatalogUrl_(brandModel.brand, brandModel.model, city),
     updated_at: new Date().toISOString()
   };
@@ -335,13 +479,71 @@ function parseCardTextBlocks_(html) {
       price: onlyDigits_(match[5]),
       city,
       mileage: '',
+      body: '',
+      engine: '',
+      drive: '',
+      power: '',
       transmission: cleanText_(match[4]),
+      wheel: '',
+      image_url: '',
       url: buildCatalogUrl_(brandModel.brand, brandModel.model, city),
       updated_at: new Date().toISOString()
     });
   }
 
   return cars;
+}
+
+function parseCarDetailPage_(html) {
+  const details = {
+    mileage: '',
+    body: '',
+    engine: '',
+    drive: '',
+    power: '',
+    transmission: '',
+    wheel: '',
+    image_url: extractMetaContent_(html, 'property', 'og:image') || extractFirstImageUrl_(html, CATALOG_URL)
+  };
+  const featurePattern = /<div\b[^>]*class=["'][^"']*car-info-feature[^"']*["'][^>]*>[\s\S]*?<span\b[^>]*class=["'][^"']*car-info-feature-name[^"']*["'][^>]*>([\s\S]*?)<\/span>[\s\S]*?<span\b[^>]*class=["'][^"']*car-info-feature-itself[^"']*["'][^>]*>([\s\S]*?)<\/span>[\s\S]*?<\/div>/gi;
+  let match;
+
+  while ((match = featurePattern.exec(html)) !== null) {
+    const name = cleanText_(stripTags_(match[1])).toLowerCase();
+    const value = cleanText_(stripTags_(match[2]));
+    if (!value) continue;
+    if (name === 'пробег') details.mileage = value;
+    if (name === 'кузов') details.body = value;
+    if (name === 'двигатель') details.engine = value;
+    if (name === 'привод') details.drive = value;
+    if (name === 'мощность') details.power = value;
+    if (name === 'кпп') details.transmission = value;
+    if (name === 'руль') details.wheel = value;
+  }
+
+  return details;
+}
+
+function extractMetaContent_(html, attrName, attrValue) {
+  const pattern = new RegExp(`<meta\\b(?=[^>]*${attrName}=["']${escapeRegExp_(attrValue)}["'])(?=[^>]*content=["']([^"']+)["'])[^>]*>`, 'i');
+  const match = String(html || '').match(pattern);
+  return match ? cleanText_(match[1]) : '';
+}
+
+function extractFirstImageUrl_(html, baseUrl) {
+  const block = String(html || '');
+  const displayBlockMatch = block.match(/<div\b[^>]*class=["'][^"']*car-in-image[^"']*["'][^>]*style=["'][^"']*display:\s*block[^"']*["'][^>]*>[\s\S]*?<img\b[^>]*(?:data-src|src)=["']([^"']+)["']/i);
+  const imageMatch = displayBlockMatch || block.match(/<img\b[^>]*(?:data-src|src)=["']([^"']+)["'][^>]*>/i);
+  if (!imageMatch) return '';
+  return absoluteUrl_(imageMatch[1], baseUrl || CATALOG_URL);
+}
+
+function mergeCar_(existing, incoming) {
+  const merged = Object.assign({}, existing || {}, incoming || {});
+  Object.keys(existing || {}).forEach((key) => {
+    if (existing[key] && !incoming[key]) merged[key] = existing[key];
+  });
+  return merged;
 }
 
 function splitBrandModel_(title) {
@@ -481,4 +683,8 @@ function cleanText_(value) {
 
 function onlyDigits_(value) {
   return String(value || '').replace(/[^\d]/g, '');
+}
+
+function escapeRegExp_(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

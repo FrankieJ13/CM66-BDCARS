@@ -115,13 +115,31 @@ input {
 
 .result-card {
   display: grid;
-  grid-template-rows: auto auto 1fr auto;
   gap: 6px;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px;
   background: var(--soft);
   min-width: 0;
+}
+
+.result-card.has-image {
+  grid-template-columns: minmax(0, 1fr) 76px;
+  align-items: start;
+}
+
+.result-card-content {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.result-card-image {
+  width: 76px;
+  aspect-ratio: 4 / 3;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #d8e0e7;
 }
 
 .result-card h2 {
@@ -139,6 +157,33 @@ input {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.35;
+}
+
+.specs {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.specs div {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+}
+
+.specs dt {
+  color: #435265;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.specs dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .result-card a {
