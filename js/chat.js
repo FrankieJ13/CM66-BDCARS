@@ -279,6 +279,7 @@
     els.status.textContent = "Загрузка каталога...";
     try {
       state.cars = await loadCsvCars(csvUrl);
+      if (!state.cars.length) throw new Error("Каталог пуст");
       els.status.textContent = `${state.cars.length} авто в базе`;
       runInitialQuery(initialQuery);
     } catch (error) {
