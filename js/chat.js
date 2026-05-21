@@ -1,13 +1,38 @@
 (function () {
   const config = window.AUTO_ASSISTANT_CONFIG || {};
   const dictionary = window.AUTO_ASSISTANT_DICTIONARY || {};
-  const state = { cars: [] };
+  const storageKeys = {
+    history: "cm66-assistant-chat-history",
+    fontSize: "cm66-assistant-font-size"
+  };
+  const commands = [
+    {
+      id: "clear",
+      command: "/очистить чат",
+      label: "Очистить чат",
+      description: "Удалить сообщения и локальную историю"
+    },
+    {
+      id: "font",
+      command: "/размер шрифта",
+      label: "Изменить размер шрифта",
+      description: "Ввести число от 10 до 18"
+    },
+    {
+      id: "freshness",
+      command: "/актуальность бд",
+      label: "Актуальность БД",
+      description: "Показать дату обновления базы"
+    }
+  ];
+  const state = { cars: [], awaitingFontSize: false };
 
   const els = {
     form: document.getElementById("chatForm"),
     input: document.getElementById("chatInput"),
     window: document.getElementById("chatWindow"),
-    status: document.getElementById("catalogStatus")
+    status: document.getElementById("catalogStatus"),
+    commandMenu: document.getElementById("commandMenu")
   };
 
   const aliasIndex = buildAliasIndex(dictionary);
@@ -254,12 +279,14 @@
     return null;
   }
 
-  function addMessage(type, html) {
+  function addMessage(type, html, options = {}) {
     const message = document.createElement("article");
     message.className = `message ${type}`;
+    if (options.transient) message.dataset.transient = "true";
     message.innerHTML = html;
     els.window.appendChild(message);
     els.window.scrollTop = els.window.scrollHeight;
+    if (options.save !== false) saveHistory();
   }
 
   function renderAssistantReply(query) {
@@ -321,6 +348,133 @@
     return /^https?:\/\//i.test(url) ? url : "";
   }
 
+  function renderCommandList() {
+    return `
+      <div class="command-list">
+        ${commands.map((item) => `
+          <button type="button" class="command-item" data-command="${escapeHtml(item.command)}">
+            <strong>${escapeHtml(item.label)}</strong>
+            <span>${escapeHtml(item.description)}</span>
+          </button>
+        `).join("")}
+      </div>
+    `;
+  }
+
+  function showCommandMenu() {
+    els.commandMenu.innerHTML = renderCommandList();
+    els.commandMenu.hidden = false;
+  }
+
+  function hideCommandMenu() {
+    els.commandMenu.hidden = true;
+    els.commandMenu.innerHTML = "";
+  }
+
+  function getCommand(query) {
+    const normalized = normalizeText(query).replace(/^\/\s*/, "");
+    return commands.find((item) => normalizeText(item.command).replace(/^\/\s*/, "") === normalized)
+      || commands.find((item) => normalizeText(item.label) === normalized);
+  }
+
+  function handleCommand(query) {
+    const command = getCommand(query);
+    hideCommandMenu();
+
+    if (!command) {
+      addMessage("user", `<p>${escapeHtml(query)}</p>`);
+      addMessage("assistant", `<p>Выберите команду из списка.</p>${renderCommandList()}`);
+      return true;
+    }
+
+    if (command.id === "clear") {
+      localStorage.removeItem(storageKeys.history);
+      els.window.innerHTML = "";
+      addMessage("assistant", "<p>Чат очищен.</p>", { save: false, transient: true });
+      return true;
+    }
+
+    addMessage("user", `<p>${escapeHtml(command.command)}</p>`);
+
+    if (command.id === "font") {
+      state.awaitingFontSize = true;
+      addMessage("assistant", "<p>Введите размер шрифта числом от 10 до 18.</p>");
+      return true;
+    }
+
+    if (command.id === "freshness") {
+      addMessage("assistant", `<p>${escapeHtml(getDatabaseFreshness())}</p>`);
+      return true;
+    }
+
+    return true;
+  }
+
+  function getDatabaseFreshness() {
+    if (!state.cars.length) return "База пока не загружена.";
+    const dates = state.cars
+      .map((car) => Date.parse(car.updated_at || car.updatedAt || car.updatedat || ""))
+      .filter(Number.isFinite);
+
+    if (!dates.length) {
+      return `${state.cars.length} авто в базе, дата обновления в таблице не указана.`;
+    }
+
+    const latest = new Date(Math.max(...dates));
+    const formatted = new Intl.DateTimeFormat("ru-RU", {
+      dateStyle: "medium",
+      timeStyle: "short"
+    }).format(latest);
+    return `База обновлялась: ${formatted}. Сейчас в базе ${state.cars.length} авто.`;
+  }
+
+  function handleFontSizeInput(query) {
+    const size = Number(String(query).replace(/[^\d]/g, ""));
+    addMessage("user", `<p>${escapeHtml(query)}</p>`);
+    if (!Number.isInteger(size) || size < 10 || size > 18) {
+      addMessage("assistant", "<p>Нужно число от 10 до 18. Например: 14.</p>");
+      return true;
+    }
+
+    state.awaitingFontSize = false;
+    applyFontSize(size);
+    localStorage.setItem(storageKeys.fontSize, String(size));
+    addMessage("assistant", `<p>Готово. Размер шрифта: ${size}px.</p>`);
+    return true;
+  }
+
+  function applyFontSize(size) {
+    document.documentElement.style.setProperty("--chat-font-size", `${size}px`);
+  }
+
+  function loadSettings() {
+    const savedSize = Number(localStorage.getItem(storageKeys.fontSize));
+    if (Number.isInteger(savedSize) && savedSize >= 10 && savedSize <= 18) {
+      applyFontSize(savedSize);
+    }
+  }
+
+  function saveHistory() {
+    const items = Array.from(els.window.querySelectorAll(".message:not([data-transient])"))
+      .slice(-80)
+      .map((message) => ({
+        type: message.classList.contains("user") ? "user" : "assistant",
+        html: message.innerHTML
+      }));
+    localStorage.setItem(storageKeys.history, JSON.stringify(items));
+  }
+
+  function restoreHistory() {
+    try {
+      const items = JSON.parse(localStorage.getItem(storageKeys.history) || "[]");
+      if (!Array.isArray(items) || !items.length) return;
+      els.window.innerHTML = "";
+      items.forEach((item) => addMessage(item.type === "user" ? "user" : "assistant", item.html || "", { save: false }));
+    } catch (error) {
+      localStorage.removeItem(storageKeys.history);
+    }
+  }
+
   function escapeHtml(value) {
     return String(value || "")
       .replace(/&/g, "&amp;")
@@ -346,7 +500,7 @@
     try {
       state.cars = await loadCsvCars(csvUrl);
       if (!state.cars.length) throw new Error("Каталог пуст");
-      els.status.textContent = `${state.cars.length} авто в базе`;
+      els.status.textContent = getDatabaseFreshness();
       runInitialQuery(initialQuery);
     } catch (error) {
       if (!config.fallbackCsvUrl || csvFromUrl) {
@@ -388,11 +542,48 @@
     event.preventDefault();
     const query = els.input.value.trim();
     if (!query) return;
+
+    if (state.awaitingFontSize) {
+      handleFontSizeInput(query);
+      els.input.value = "";
+      els.input.focus();
+      return;
+    }
+
+    if (query.startsWith("/")) {
+      handleCommand(query);
+      els.input.value = "";
+      els.input.focus();
+      return;
+    }
+
     addMessage("user", `<p>${escapeHtml(query)}</p>`);
     renderAssistantReply(query);
     els.input.value = "";
     els.input.focus();
   });
 
+  els.input.addEventListener("input", () => {
+    const value = els.input.value.trim();
+    if (value.startsWith("/")) showCommandMenu();
+    else hideCommandMenu();
+  });
+
+  els.commandMenu.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-command]");
+    if (!button) return;
+    els.input.value = button.dataset.command;
+    els.form.requestSubmit();
+  });
+
+  els.window.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-command]");
+    if (!button) return;
+    els.input.value = button.dataset.command;
+    els.form.requestSubmit();
+  });
+
+  loadSettings();
+  restoreHistory();
   loadCars();
 })();
