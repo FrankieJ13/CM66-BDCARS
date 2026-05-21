@@ -2,25 +2,11 @@ const SPREADSHEET_ID = '1Ad27O54xpAS4vcHPA9Ds4e4pyAMN7SLgz6w0kgo44iU';
 const SHEET_NAME = 'BD';
 const LOG_SHEET_NAME = 'sync_log';
 const HEADERS = ['brand', 'model', 'title', 'year', 'price', 'city', 'mileage', 'transmission', 'url', 'updated_at'];
-const MAX_PAGES_PER_CITY = 3;
-const REQUEST_PAUSE_MS = 1200;
+const CATALOG_URL = 'https://crystal-motors.ru/avtomobili_s_probegom';
+const MAX_CATALOG_PAGES = 180;
+const REQUEST_PAUSE_MS = 450;
+const AUTO_REFRESH_INTERVAL_MINUTES = 90;
 const ASSISTANT_URL = 'https://frankiej13.github.io/CM66-BDCARS/';
-
-const CITY_CATALOGS = [
-  'https://crystal-motors.ru/avtomobili_s_probegom',
-  'https://chel.crystal-motors.ru/avtomobili_s_probegom',
-  'https://tumen.crystal-motors.ru/avtomobili_s_probegom',
-  'https://tomsk.crystal-motors.ru/avtomobili_s_probegom',
-  'https://omsk.crystal-motors.ru/avtomobili_s_probegom',
-  'https://krasnoyarsk.crystal-motors.ru/avtomobili_s_probegom',
-  'https://surgut.crystal-motors.ru/avtomobili_s_probegom',
-  'https://novosib.crystal-motors.ru/avtomobili_s_probegom',
-  'https://nkz.crystal-motors.ru/avtomobili_s_probegom',
-  'https://kemerovo.crystal-motors.ru/avtomobili_s_probegom',
-  'https://barnaul.crystal-motors.ru/avtomobili_s_probegom',
-  'https://perm.crystal-motors.ru/avtomobili_s_probegom',
-  'https://orenburg.crystal-motors.ru/avtomobili_s_probegom'
-];
 
 function onOpen() {
   SpreadsheetApp.getUi()
@@ -40,7 +26,7 @@ function menuRefreshCatalog() {
 
 function menuSetupSync() {
   setupCrystalMotorsSync();
-  SpreadsheetApp.getUi().alert('Готово: автообновление включено. База будет обновляться раз в 30 минут.');
+  SpreadsheetApp.getUi().alert('Готово: автообновление включено. База будет обновляться примерно раз в 1,5 часа.');
 }
 
 function menuTestParser() {
@@ -58,9 +44,9 @@ function menuOpenAssistant() {
 
 function setupCrystalMotorsSync() {
   writeHeaders_();
-  deleteExistingTriggers_('refreshCrystalMotorsCatalog');
+  deleteExistingTriggers_('scheduledRefreshCrystalMotorsCatalog');
   createCrystalMotorsTrigger();
-  logSync_('setup', 'OK', 'Headers created, trigger installed. Run refreshCrystalMotorsCatalog to fill BD now.');
+  logSync_('setup', 'OK', 'Headers created, 90-minute guarded trigger installed. Run refreshCrystalMotorsCatalog to fill BD now.');
 }
 
 function setupAndRefreshCrystalMotorsSync() {
@@ -73,15 +59,13 @@ function refreshCrystalMotorsCatalog() {
     const sheet = getCarsSheet_();
     const found = new Map();
 
-    CITY_CATALOGS.forEach((catalogUrl) => {
-      for (let page = 1; page <= MAX_PAGES_PER_CITY; page += 1) {
-        const url = page === 1 ? catalogUrl : `${catalogUrl}/?PAGEN_1=${page}`;
-        const cars = parseCatalogPage_(fetchText_(url), catalogUrl);
-        if (!cars.length) break;
-        cars.forEach((car) => found.set(car.url, car));
-        Utilities.sleep(REQUEST_PAUSE_MS);
-      }
-    });
+    for (let page = 1; page <= MAX_CATALOG_PAGES; page += 1) {
+      const url = page === 1 ? CATALOG_URL : `${CATALOG_URL}/?PAGEN_1=${page}`;
+      const cars = parseCatalogPage_(fetchText_(url), CATALOG_URL);
+      if (!cars.length) break;
+      cars.forEach((car) => found.set(car.url, car));
+      Utilities.sleep(REQUEST_PAUSE_MS);
+    }
 
     const rows = Array.from(found.values())
       .sort((a, b) => String(a.city).localeCompare(String(b.city), 'ru') || Number(a.price) - Number(b.price))
@@ -91,7 +75,8 @@ function refreshCrystalMotorsCatalog() {
     sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
     if (rows.length) sheet.getRange(2, 1, rows.length, HEADERS.length).setValues(rows);
     sheet.autoResizeColumns(1, HEADERS.length);
-    logSync_('refresh', 'OK', `${rows.length} cars written`);
+    PropertiesService.getScriptProperties().setProperty('last_refresh_at', String(Date.now()));
+    logSync_('refresh', 'OK', `${rows.length} cars written from full catalog`);
   } catch (error) {
     logSync_('refresh', 'ERROR', error.stack || error.message);
     throw error;
@@ -99,14 +84,25 @@ function refreshCrystalMotorsCatalog() {
 }
 
 function createCrystalMotorsTrigger() {
-  ScriptApp.newTrigger('refreshCrystalMotorsCatalog')
+  ScriptApp.newTrigger('scheduledRefreshCrystalMotorsCatalog')
     .timeBased()
     .everyMinutes(30)
     .create();
 }
 
+function scheduledRefreshCrystalMotorsCatalog() {
+  const properties = PropertiesService.getScriptProperties();
+  const lastRefresh = Number(properties.getProperty('last_refresh_at') || 0);
+  const ageMinutes = (Date.now() - lastRefresh) / 60000;
+  if (lastRefresh && ageMinutes < AUTO_REFRESH_INTERVAL_MINUTES) {
+    logSync_('scheduled_refresh', 'SKIP', `Last refresh was ${Math.round(ageMinutes)} minutes ago`);
+    return;
+  }
+  refreshCrystalMotorsCatalog();
+}
+
 function testCrystalMotorsParser() {
-  const url = CITY_CATALOGS[0];
+  const url = CATALOG_URL;
   const cars = parseCatalogPage_(fetchText_(url), url);
   logSync_('test', cars.length ? 'OK' : 'EMPTY', `${cars.length} cars parsed from ${url}`);
   return cars.slice(0, 5);
