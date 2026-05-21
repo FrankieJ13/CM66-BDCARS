@@ -23,6 +23,7 @@ function onOpen() {
     .createMenu('CM66 авто')
     .addItem('Полное обновление базы', 'menuRefreshCatalog')
     .addItem('Дневной апдейт без очистки', 'menuIncrementalRefreshCatalog')
+    .addItem('Записать буфер в BD', 'menuFlushCatalogBuffer')
     .addItem('Дозаполнить фото и характеристики', 'menuEnrichCarDetails')
     .addItem('Заново пройти фото и характеристики', 'menuRestartCarDetails')
     .addItem('Настроить автообновление', 'menuSetupSync')
@@ -42,6 +43,11 @@ function menuRefreshCatalog() {
 function menuIncrementalRefreshCatalog() {
   incrementalRefreshCrystalMotorsCatalog();
   SpreadsheetApp.getUi().alert('Готово: дневной апдейт выполнен без очистки текущей BD. Подробности смотрите во вкладке sync_log.');
+}
+
+function menuFlushCatalogBuffer() {
+  flushCatalogBufferToBD();
+  SpreadsheetApp.getUi().alert('Готово: машины из буфера записаны в BD. Подробности смотрите во вкладке sync_log.');
 }
 
 function menuEnrichCarDetails() {
@@ -132,10 +138,10 @@ function refreshCrystalMotorsCatalog() {
     if (nextPage > MAX_CATALOG_PAGES) finished = true;
 
     writeBufferedCars_(Array.from(found.values()));
+    if (found.size) writeCarsToSheet_(Array.from(found.values()));
     properties.setProperty('next_page', String(nextPage));
 
     if (!finished) {
-      if (syncMode !== 'full') writeCarsToSheet_(Array.from(found.values()));
       logSync_('refresh_batch', 'CONTINUE', `Pages ${startPage}-${nextPage - 1} processed, ${found.size} cars buffered, next page ${nextPage}`);
       return;
     }
@@ -151,6 +157,17 @@ function refreshCrystalMotorsCatalog() {
     logSync_('refresh', 'ERROR', error.stack || error.message);
     throw error;
   }
+}
+
+function flushCatalogBufferToBD() {
+  const cars = readBufferedCars_();
+  if (!cars.length) {
+    logSync_('flush_buffer', 'EMPTY', 'sync_buffer is empty, nothing written to BD');
+    return;
+  }
+
+  writeCarsToSheet_(cars);
+  logSync_('flush_buffer', 'OK', `${cars.length} buffered cars written to BD`);
 }
 
 function createCrystalMotorsTrigger() {
