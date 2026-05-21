@@ -410,10 +410,12 @@ input {
   box-shadow: 0 14px 36px rgb(20 33 61 / 14%);
 }
 
-.command-item {
+.composer .command-item,
+.message .command-item {
   display: grid;
   gap: 2px;
   width: 100%;
+  min-height: auto;
   border: 0;
   border-radius: 7px;
   background: #f2f6f8;
@@ -423,17 +425,24 @@ input {
   cursor: pointer;
 }
 
-.command-item:hover {
+.composer .command-item:hover,
+.message .command-item:hover {
   background: #e7eef3;
 }
 
 .command-item strong {
   font-size: 14px;
+  color: var(--ink);
 }
 
 .command-item span {
   color: var(--muted);
   font-size: 12px;
+}
+
+.composer .command-item svg,
+.message .command-item svg {
+  display: none;
 }
 
 @media (max-width: 640px) {
