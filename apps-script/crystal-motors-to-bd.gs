@@ -194,7 +194,7 @@ function flushCatalogBufferToBD() {
 function createCrystalMotorsTrigger() {
   ScriptApp.newTrigger('scheduledRefreshCrystalMotorsCatalog')
     .timeBased()
-    .everyMinutes(30)
+    .everyMinutes(3)
     .create();
   ScriptApp.newTrigger('scheduledDaytimeIncrementalCatalogSync')
     .timeBased()
