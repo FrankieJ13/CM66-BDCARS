@@ -128,29 +128,31 @@ function fetchText_(url) {
 
 function parseCatalogPage_(html, baseUrl) {
   const cars = [];
-  const anchorPattern = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  const anchorPattern = /<a\b[^>]*class=["'][^"']*product_card[^"']*["'][^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
   let match;
 
   while ((match = anchorPattern.exec(html)) !== null) {
     const href = match[1];
-    if (!/\/avtomobili_s_probegom\//i.test(href) || /^javascript:/i.test(href) || href.indexOf('#') === 0) continue;
+    if (/^javascript:/i.test(href) || href.indexOf('#') === 0) continue;
 
     const text = cleanText_(stripTags_(match[2]));
     if (!/В наличии в/i.test(text) || !/Добавить в список избранного/i.test(text) || !/Купить в кредит/i.test(text)) continue;
 
-    const car = parseCardText_(text, absoluteUrl_(href, baseUrl));
+    const car = parseCardText_(text, href ? absoluteUrl_(href, baseUrl) : '');
     if (car.url && car.title && car.price) cars.push(car);
   }
 
-  return dedupeCars_(cars);
+  if (cars.length) return dedupeCars_(cars);
+
+  return dedupeCars_(parseCardTextBlocks_(html));
 }
 
 function parseCardText_(text, url) {
-  const cityMatch = text.match(/В наличии в\s+([А-Яа-яЁё\-\s]+?)\s+\$?\(?document/i);
-  const titleMatch = text.match(/\}\);\s*([^]+?)\s+Добавить в список избранного/i);
+  const cityTitleMatch = text.match(new RegExp(`В наличии в\\s+(${getCityPattern_()})\\s+([\\s\\S]+?)\\s+Добавить в список избранного`, 'i'));
   const specsMatch = text.match(/(\d{4})\s*\/\s*([А-Яа-яЁёA-Za-z\s]+)/i);
   const priceMatch = text.match(/(\d[\d\s]{2,})\s*₽/);
-  const title = cleanText_(titleMatch ? titleMatch[1] : '');
+  const city = cleanText_(cityTitleMatch ? cityTitleMatch[1] : '');
+  const title = cleanTitle_(cityTitleMatch ? cityTitleMatch[2] : '');
   const brandModel = splitBrandModel_(title);
 
   return {
@@ -159,12 +161,39 @@ function parseCardText_(text, url) {
     title,
     year: specsMatch ? specsMatch[1] : '',
     price: priceMatch ? onlyDigits_(priceMatch[1]) : '',
-    city: cleanText_(cityMatch ? cityMatch[1] : ''),
+    city,
     mileage: '',
     transmission: specsMatch ? cleanText_(specsMatch[2]) : '',
-    url,
+    url: isUsefulCarUrl_(url) ? url : buildCatalogUrl_(brandModel.brand, brandModel.model, city),
     updated_at: new Date().toISOString()
   };
+}
+
+function parseCardTextBlocks_(html) {
+  const text = cleanText_(stripTags_(html));
+  const cars = [];
+  const pattern = new RegExp(`В наличии в\\s+(${getCityPattern_()})\\s+([\\s\\S]+?)\\s+Добавить в список избранного[\\s\\S]*?(\\d{4})\\s*\\/\\s*([А-Яа-яЁёA-Za-z\\s]+?)\\s+(\\d[\\d\\s]{2,})\\s*₽[\\s\\S]*?Купить в кредит`, 'g');
+  let match;
+
+  while ((match = pattern.exec(text)) !== null) {
+    const city = cleanText_(match[1]);
+    const title = cleanTitle_(match[2]);
+    const brandModel = splitBrandModel_(title);
+    cars.push({
+      brand: brandModel.brand,
+      model: brandModel.model,
+      title,
+      year: match[3],
+      price: onlyDigits_(match[5]),
+      city,
+      mileage: '',
+      transmission: cleanText_(match[4]),
+      url: buildCatalogUrl_(brandModel.brand, brandModel.model, city),
+      updated_at: new Date().toISOString()
+    });
+  }
+
+  return cars;
 }
 
 function splitBrandModel_(title) {
@@ -182,6 +211,71 @@ function absoluteUrl_(href, baseUrl) {
   return `${origin}${href.charAt(0) === '/' ? '' : '/'}${href}`;
 }
 
+function isUsefulCarUrl_(url) {
+  return /^https?:\/\//i.test(url) && /\/avtomobili_s_probegom\/.+/i.test(url);
+}
+
+function buildCatalogUrl_(brand, model, city) {
+  const host = getCityHost_(city);
+  const brandSlug = slugify_(brand);
+  const modelSlug = slugify_(model);
+  const parts = ['avtomobili_s_probegom'];
+  if (brandSlug) parts.push(brandSlug);
+  if (modelSlug) parts.push(modelSlug);
+  return `https://${host}/${parts.join('/')}`;
+}
+
+function getCityHost_(city) {
+  const normalized = cleanText_(city).toLowerCase();
+  const hosts = {
+    'екатеринбурге': 'crystal-motors.ru',
+    'екатеринбург': 'crystal-motors.ru',
+    'челябинске': 'chel.crystal-motors.ru',
+    'челябинск': 'chel.crystal-motors.ru',
+    'тюмени': 'tumen.crystal-motors.ru',
+    'тюмень': 'tumen.crystal-motors.ru',
+    'томске': 'tomsk.crystal-motors.ru',
+    'томск': 'tomsk.crystal-motors.ru',
+    'омске': 'omsk.crystal-motors.ru',
+    'омск': 'omsk.crystal-motors.ru',
+    'красноярске': 'krasnoyarsk.crystal-motors.ru',
+    'красноярск': 'krasnoyarsk.crystal-motors.ru',
+    'сургуте': 'surgut.crystal-motors.ru',
+    'сургут': 'surgut.crystal-motors.ru',
+    'новосибирске': 'novosib.crystal-motors.ru',
+    'новосибирск': 'novosib.crystal-motors.ru',
+    'новокузнецке': 'nkz.crystal-motors.ru',
+    'новокузнецк': 'nkz.crystal-motors.ru',
+    'кемерово': 'kemerovo.crystal-motors.ru',
+    'барнауле': 'barnaul.crystal-motors.ru',
+    'барнаул': 'barnaul.crystal-motors.ru',
+    'перми': 'perm.crystal-motors.ru',
+    'пермь': 'perm.crystal-motors.ru',
+    'оренбурге': 'orenburg.crystal-motors.ru',
+    'оренбург': 'orenburg.crystal-motors.ru'
+  };
+  return hosts[normalized] || 'crystal-motors.ru';
+}
+
+function slugify_(value) {
+  const dictionary = {
+    'ваз (lada)': 'lada',
+    'mercedes-benz': 'mercedes-benz',
+    'cx-5': 'cx-5',
+    'golf plus': 'golf-plus',
+    'vesta cross': 'vesta-cross'
+  };
+  const normalized = cleanText_(value).toLowerCase();
+  if (dictionary[normalized]) return dictionary[normalized];
+  return normalized
+    .replace(/ё/g, 'е')
+    .replace(/[^a-z0-9а-я\s-]/g, '')
+    .replace(/[а-я]+/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
 function dedupeCars_(cars) {
   const map = new Map();
   cars.forEach((car) => map.set(car.url, car));
@@ -190,6 +284,43 @@ function dedupeCars_(cars) {
 
 function stripTags_(html) {
   return String(html || '').replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<[^>]+>/g, ' ');
+}
+
+function getCityPattern_() {
+  return [
+    'Екатеринбурге',
+    'Екатеринбург',
+    'Челябинске',
+    'Челябинск',
+    'Тюмени',
+    'Тюмень',
+    'Томске',
+    'Томск',
+    'Омске',
+    'Омск',
+    'Красноярске',
+    'Красноярск',
+    'Сургуте',
+    'Сургут',
+    'Новосибирске',
+    'Новосибирск',
+    'Новокузнецке',
+    'Новокузнецк',
+    'Кемерово',
+    'Барнауле',
+    'Барнаул',
+    'Перми',
+    'Пермь',
+    'Оренбурге',
+    'Оренбург'
+  ].join('|');
+}
+
+function cleanTitle_(value) {
+  return cleanText_(value)
+    .replace(/^Витринный образец\s+/i, '')
+    .replace(/^Со скидкой\s+/i, '')
+    .trim();
 }
 
 function cleanText_(value) {
