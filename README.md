@@ -54,6 +54,32 @@ brand | model | title | year | price | city | mileage | transmission | url | upd
 
 Важно: чтобы GitHub Pages мог читать таблицу напрямую, таблица должна быть доступна по ссылке или опубликована как CSV. Если таблица закрыта, ассистент временно покажет демо-базу из `sample-data/cars.csv`.
 
+## Установка Google Apps Script парсера
+
+Да, таблицу нужно наполнить через Google Apps Script. Готовый скрипт лежит здесь:
+
+```text
+apps-script/crystal-motors-to-bd.gs
+```
+
+Как поставить:
+
+1. Откройте таблицу `CM BD`.
+2. Перейдите в `Extensions -> Apps Script`.
+3. Удалите пустой код и вставьте содержимое `apps-script/crystal-motors-to-bd.gs`.
+4. Нажмите Save.
+5. В выпадающем списке функций выберите `setupCrystalMotorsSync`.
+6. Нажмите Run и выдайте права.
+7. Затем выберите `refreshCrystalMotorsCatalog` и запустите вручную первый раз.
+
+После этого:
+
+- вкладка `BD` наполнится строками авто;
+- вкладка `sync_log` покажет статус синхронизации или ошибку;
+- обновление будет идти раз в 30 минут.
+
+Для быстрой проверки парсера можно запустить функцию `testCrystalMotorsParser`: она запишет результат в `sync_log` и вернет первые найденные авто в Apps Script execution log.
+
 Также CSV можно передать через URL:
 
 ```text

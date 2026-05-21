@@ -1,5 +1,6 @@
 const SPREADSHEET_ID = '1Ad27O54xpAS4vcHPA9Ds4e4pyAMN7SLgz6w0kgo44iU';
 const SHEET_NAME = 'BD';
+const LOG_SHEET_NAME = 'sync_log';
 const HEADERS = ['brand', 'model', 'title', 'year', 'price', 'city', 'mileage', 'transmission', 'url', 'updated_at'];
 const MAX_PAGES_PER_CITY = 3;
 const REQUEST_PAUSE_MS = 1200;
@@ -20,28 +21,41 @@ const CITY_CATALOGS = [
   'https://orenburg.crystal-motors.ru/avtomobili_s_probegom'
 ];
 
+function setupCrystalMotorsSync() {
+  writeHeaders_();
+  deleteExistingTriggers_('refreshCrystalMotorsCatalog');
+  createCrystalMotorsTrigger();
+  logSync_('setup', 'OK', 'Headers created, trigger installed');
+}
+
 function refreshCrystalMotorsCatalog() {
-  const sheet = getCarsSheet_();
-  const found = new Map();
+  try {
+    const sheet = getCarsSheet_();
+    const found = new Map();
 
-  CITY_CATALOGS.forEach((catalogUrl) => {
-    for (let page = 1; page <= MAX_PAGES_PER_CITY; page += 1) {
-      const url = page === 1 ? catalogUrl : `${catalogUrl}/?PAGEN_1=${page}`;
-      const cars = parseCatalogPage_(fetchText_(url), catalogUrl);
-      if (!cars.length) break;
-      cars.forEach((car) => found.set(car.url, car));
-      Utilities.sleep(REQUEST_PAUSE_MS);
-    }
-  });
+    CITY_CATALOGS.forEach((catalogUrl) => {
+      for (let page = 1; page <= MAX_PAGES_PER_CITY; page += 1) {
+        const url = page === 1 ? catalogUrl : `${catalogUrl}/?PAGEN_1=${page}`;
+        const cars = parseCatalogPage_(fetchText_(url), catalogUrl);
+        if (!cars.length) break;
+        cars.forEach((car) => found.set(car.url, car));
+        Utilities.sleep(REQUEST_PAUSE_MS);
+      }
+    });
 
-  const rows = Array.from(found.values())
-    .sort((a, b) => String(a.city).localeCompare(String(b.city), 'ru') || Number(a.price) - Number(b.price))
-    .map((car) => HEADERS.map((header) => car[header] || ''));
+    const rows = Array.from(found.values())
+      .sort((a, b) => String(a.city).localeCompare(String(b.city), 'ru') || Number(a.price) - Number(b.price))
+      .map((car) => HEADERS.map((header) => car[header] || ''));
 
-  sheet.clearContents();
-  sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
-  if (rows.length) sheet.getRange(2, 1, rows.length, HEADERS.length).setValues(rows);
-  sheet.autoResizeColumns(1, HEADERS.length);
+    sheet.clearContents();
+    sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
+    if (rows.length) sheet.getRange(2, 1, rows.length, HEADERS.length).setValues(rows);
+    sheet.autoResizeColumns(1, HEADERS.length);
+    logSync_('refresh', 'OK', `${rows.length} cars written`);
+  } catch (error) {
+    logSync_('refresh', 'ERROR', error.stack || error.message);
+    throw error;
+  }
 }
 
 function createCrystalMotorsTrigger() {
@@ -51,11 +65,48 @@ function createCrystalMotorsTrigger() {
     .create();
 }
 
+function testCrystalMotorsParser() {
+  const url = CITY_CATALOGS[0];
+  const cars = parseCatalogPage_(fetchText_(url), url);
+  logSync_('test', cars.length ? 'OK' : 'EMPTY', `${cars.length} cars parsed from ${url}`);
+  return cars.slice(0, 5);
+}
+
+function writeHeaders_() {
+  const sheet = getCarsSheet_();
+  sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
+  sheet.setFrozenRows(1);
+  sheet.autoResizeColumns(1, HEADERS.length);
+}
+
+function deleteExistingTriggers_(handlerName) {
+  ScriptApp.getProjectTriggers().forEach((trigger) => {
+    if (trigger.getHandlerFunction() === handlerName) {
+      ScriptApp.deleteTrigger(trigger);
+    }
+  });
+}
+
 function getCarsSheet_() {
   const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
   let sheet = spreadsheet.getSheetByName(SHEET_NAME);
   if (!sheet) sheet = spreadsheet.insertSheet(SHEET_NAME);
   return sheet;
+}
+
+function getLogSheet_() {
+  const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+  let sheet = spreadsheet.getSheetByName(LOG_SHEET_NAME);
+  if (!sheet) {
+    sheet = spreadsheet.insertSheet(LOG_SHEET_NAME);
+    sheet.getRange(1, 1, 1, 4).setValues([['timestamp', 'action', 'status', 'message']]);
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+function logSync_(action, status, message) {
+  getLogSheet_().appendRow([new Date().toISOString(), action, status, String(message || '').slice(0, 1000)]);
 }
 
 function fetchText_(url) {
