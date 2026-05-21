@@ -91,13 +91,12 @@
   }
 
   function parseQuery(rawQuery) {
-    const query = compactKnownPhrases(normalizeText(rawQuery));
-    const budget = extractBudget(query);
+    const budget = extractBudget(rawQuery);
+    const query = compactKnownPhrases(normalizeText(removeBudgetPhrases(rawQuery)));
     const automaticWords = dictionary.transmissions?.automatic || [];
     const manualWords = dictionary.transmissions?.manual || [];
     const stopWords = dictionary.stopWords || [];
     const terms = query
-      .replace(/(?:до|<=|меньше|не дороже)\s*\d+(?:[\s.,]\d+)*\s*(млн|мил|тыс|к)?/gi, "")
       .split(/\s+/)
       .filter((term) => term.length > 1);
 
@@ -138,14 +137,39 @@
     return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
-  function extractBudget(query) {
-    const match = query.match(/(?:до|<=|меньше|не дороже)\s*(\d+(?:[\s.,]\d+)*)\s*(млн|мил|тыс|к)?/i);
-    if (!match) return null;
-    let value = parseMoney(match[1]);
-    const unit = normalizeText(match[2]);
-    if (unit === "млн" || unit === "мил") value *= 1000000;
-    if (unit === "тыс" || unit === "к" || value < 10000) value *= 1000;
-    return value;
+  function removeBudgetPhrases(query) {
+    return String(query || "")
+      .replace(getBudgetPattern(), " ")
+      .replace(/\s+/g, " ");
+  }
+
+  function getBudgetPattern() {
+    return /(?:до|<=|<|меньше|дешевле|не\s+дороже|бюджет(?:ом)?|цена\s+до|стоимость\s+до)?\s*\d+(?:[\s.,]\d+)*\s*(?:млн|мил(?:лион(?:а|ов)?)?|m|м|тыс(?:яч)?|тр|к|k)(?=$|\s|[.,!?])|(?:до|<=|<|меньше|дешевле|не\s+дороже|бюджет(?:ом)?|цена\s+до|стоимость\s+до)\s*\d+(?:[\s.,]\d+)*|\b[1-9]\d{5,7}\b/gi;
+  }
+
+  function extractBudget(rawQuery) {
+    const text = String(rawQuery || "").toLowerCase().replace(/ё/g, "е");
+    const matches = Array.from(text.matchAll(getBudgetPattern()));
+    const budgets = matches
+      .map((match) => parseBudgetValue(match[0]))
+      .filter((value) => value >= 50000 && value <= 50000000);
+    return budgets.length ? Math.max(...budgets) : null;
+  }
+
+  function parseBudgetValue(fragment) {
+    const text = String(fragment || "").toLowerCase().replace(/ё/g, "е");
+    const numberMatch = text.match(/\d+(?:[\s.,]\d+)*/);
+    if (!numberMatch) return 0;
+
+    const normalizedNumber = numberMatch[0].replace(/\s+/g, "");
+    const hasDecimal = /[.,]/.test(normalizedNumber);
+    let value = Number(normalizedNumber.replace(",", "."));
+    if (!Number.isFinite(value)) return 0;
+
+    if (/(млн|мил|million|\bm\b|м\b)/i.test(text)) return Math.round(value * 1000000);
+    if (/(тыс|тр|\bк\b|\bk\b)/i.test(text)) return Math.round(value * 1000);
+    if (value < 10000 && !hasDecimal) return Math.round(value * 1000);
+    return Math.round(value);
   }
 
   function canonicalToken(token) {
@@ -171,7 +195,7 @@
     const text = carSearchText(car);
     let score = 0;
     if (parsed.budget && car.price > parsed.budget) return -1;
-    if (parsed.transmission && !normalizeText(car.transmission).includes(parsed.transmission)) return -1;
+    if (parsed.transmission && !transmissionMatches(car.transmission, parsed.transmission)) return -1;
 
     for (const variants of parsed.expandedTerms) {
       if (!variants.some((term) => text.includes(term))) return -1;
@@ -180,6 +204,13 @@
 
     if (parsed.budget && car.price) score += Math.max(0, 3 - Math.floor((parsed.budget - car.price) / 200000));
     return score;
+  }
+
+  function transmissionMatches(value, requested) {
+    const text = normalizeText(value);
+    if (!requested) return true;
+    if (requested === "механика") return /механ|manual|mkpp|мкпп|руч/.test(text);
+    return /автомат|automatic|auto|akpp|акпп|вариатор|cvt|робот|dsg|дсг/.test(text);
   }
 
   function searchCars(query) {
@@ -237,13 +268,13 @@
 
     const cards = cars.map((car) => {
       const title = car.title || `${car.brand || ""} ${car.model || ""}`.trim() || "Автомобиль";
-      const details = [car.year, car.city, car.mileage, car.transmission].filter(Boolean).join(", ");
+      const details = [car.year, car.city, car.transmission].filter(Boolean).join(" · ");
       return `
         <article class="result-card">
           <h2>${escapeHtml(title)}</h2>
           <div class="price">${escapeHtml(formatMoney(car.price))}</div>
           <div class="meta">${escapeHtml(details || "детали не указаны")}</div>
-          <a href="${escapeHtml(getCarUrl(car))}" target="_blank" rel="noopener">Открыть авто</a>
+          <a href="${escapeHtml(getCarUrl(car))}" target="_blank" rel="noopener">Ссылка</a>
         </article>
       `;
     }).join("");

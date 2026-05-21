@@ -102,34 +102,43 @@ input {
   border: 1px solid var(--line);
 }
 
+.message.assistant:has(.result-list) {
+  width: min(900px, 100%);
+}
+
 .result-list {
   display: grid;
-  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr));
+  gap: 8px;
   margin-top: 12px;
 }
 
 .result-card {
   display: grid;
-  gap: 8px;
+  grid-template-rows: auto auto 1fr auto;
+  gap: 6px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 12px;
+  padding: 10px;
   background: var(--soft);
+  min-width: 0;
 }
 
 .result-card h2 {
   margin: 0;
-  font-size: 18px;
+  font-size: 15px;
+  line-height: 1.2;
 }
 
 .price {
-  font-size: 20px;
+  font-size: 17px;
   font-weight: 850;
 }
 
 .meta {
   color: var(--muted);
-  font-size: 14px;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .result-card a {
@@ -137,13 +146,14 @@ input {
   align-items: center;
   justify-content: center;
   width: fit-content;
-  min-height: 36px;
+  min-height: 30px;
   border-radius: 8px;
   background: var(--accent);
   color: #ffffff;
-  padding: 0 12px;
+  padding: 0 10px;
   text-decoration: none;
-  font-weight: 750;
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .chips {
@@ -184,14 +194,23 @@ input {
 }
 
 .composer button {
+  width: 48px;
   min-height: 48px;
   border: 0;
   border-radius: 8px;
   background: var(--accent);
   color: #ffffff;
-  padding: 0 20px;
+  padding: 0;
   font-weight: 800;
   cursor: pointer;
+}
+
+.composer button svg {
+  display: block;
+  width: 22px;
+  height: 22px;
+  margin: auto;
+  fill: currentColor;
 }
 
 .composer button:hover {
@@ -199,8 +218,7 @@ input {
 }
 
 @media (max-width: 640px) {
-  .chat-header,
-  .composer {
+  .chat-header {
     grid-template-columns: 1fr;
     display: grid;
   }
