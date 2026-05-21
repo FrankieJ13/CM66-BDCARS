@@ -24,6 +24,7 @@ function onOpen() {
     .addItem('Полное обновление базы', 'menuRefreshCatalog')
     .addItem('Дневной апдейт без очистки', 'menuIncrementalRefreshCatalog')
     .addItem('Дозаполнить фото и характеристики', 'menuEnrichCarDetails')
+    .addItem('Заново пройти фото и характеристики', 'menuRestartCarDetails')
     .addItem('Настроить автообновление', 'menuSetupSync')
     .addSeparator()
     .addItem('Сбросить прогресс обновления', 'menuResetSync')
@@ -46,6 +47,11 @@ function menuIncrementalRefreshCatalog() {
 function menuEnrichCarDetails() {
   enrichCarDetailsBatch();
   SpreadsheetApp.getUi().alert('Готово: обработан очередной пакет карточек авто. Подробности смотрите во вкладке sync_log.');
+}
+
+function menuRestartCarDetails() {
+  restartCarDetailsEnrichment();
+  SpreadsheetApp.getUi().alert('Готово: проход по фото и характеристикам начат с первой строки. Подробности смотрите во вкладке sync_log.');
 }
 
 function menuSetupSync() {
@@ -204,6 +210,11 @@ function scheduledNightlyFullCatalogRefresh() {
 
 function scheduledNightlyCatalogCountCheck() {
   verifyCatalogCount();
+}
+
+function restartCarDetailsEnrichment() {
+  PropertiesService.getScriptProperties().setProperty('details_next_row', '2');
+  enrichCarDetailsBatch();
 }
 
 function resetCatalogSyncProgress() {
@@ -605,6 +616,7 @@ function parseCardTextBlocks_(html) {
 }
 
 function parseCarDetailPage_(html) {
+  const productId = extractProductIdFromHtml_(html);
   const details = {
     mileage: '',
     body: '',
@@ -613,25 +625,48 @@ function parseCarDetailPage_(html) {
     power: '',
     transmission: '',
     wheel: '',
-    image_url: extractMetaContent_(html, 'property', 'og:image') || extractFirstImageUrl_(html, CATALOG_URL)
+    image_url: extractProductImageUrl_(html, productId) || extractMetaContent_(html, 'property', 'og:image') || extractFirstImageUrl_(html, CATALOG_URL)
   };
-  const featurePattern = /<div\b[^>]*class=["'][^"']*car-info-feature[^"']*["'][^>]*>[\s\S]*?<span\b[^>]*class=["'][^"']*car-info-feature-name[^"']*["'][^>]*>([\s\S]*?)<\/span>[\s\S]*?<span\b[^>]*class=["'][^"']*car-info-feature-itself[^"']*["'][^>]*>([\s\S]*?)<\/span>[\s\S]*?<\/div>/gi;
+  const titleMap = {
+    kilometrage: 'mileage',
+    bodytype: 'body',
+    enginesize: 'engine',
+    drivetype: 'drive',
+    power: 'power',
+    transmission: 'transmission',
+    wheeltype: 'wheel'
+  };
+  const featurePattern = /<div\b(?=[^>]*class=["'][^"']*car-info-feature[^"']*["'])(?=[^>]*title=["']([^"']+)["'])[^>]*>[\s\S]*?<span\b[^>]*class=["'][^"']*car-info-feature-itself[^"']*["'][^>]*>([\s\S]*?)<\/span>[\s\S]*?<\/div>/gi;
   let match;
 
   while ((match = featurePattern.exec(html)) !== null) {
-    const name = cleanText_(stripTags_(match[1])).toLowerCase();
+    const key = titleMap[cleanText_(match[1]).toLowerCase()];
     const value = cleanText_(stripTags_(match[2]));
-    if (!value) continue;
-    if (name === 'пробег') details.mileage = value;
-    if (name === 'кузов') details.body = value;
-    if (name === 'двигатель') details.engine = value;
-    if (name === 'привод') details.drive = value;
-    if (name === 'мощность') details.power = value;
-    if (name === 'кпп') details.transmission = value;
-    if (name === 'руль') details.wheel = value;
+    if (key && value) details[key] = value;
   }
 
   return details;
+}
+
+function extractProductIdFromHtml_(html) {
+  const match = String(html || '').match(/(?:window\.product_id\s*=\s*|product-product-)(\d+)/i);
+  return match ? match[1] : '';
+}
+
+function extractProductImageUrl_(html, productId) {
+  const idPattern = productId ? escapeRegExp_(productId) : '\\d+';
+  const contentAutoPattern = `https?:\\/\\/content-auto\\.ru\\/images\\/${idPattern}\\/[^"'\\\\]+\\.webp`;
+  const dataPhotoMatch = String(html || '').match(new RegExp(`data-photo=["'](${contentAutoPattern})["']`, 'i'));
+  if (dataPhotoMatch) return dataPhotoMatch[1];
+
+  const mainCarouselMatch = String(html || '').match(new RegExp(`<div\\b[^>]*id=["']mainCarousel["'][\\s\\S]*?(?:data-src|src)=["'](${contentAutoPattern})["']`, 'i'));
+  if (mainCarouselMatch) return mainCarouselMatch[1];
+
+  const galleryMiddleMatch = String(html || '').match(new RegExp(`"middle"\\s*:\\s*"(https?:\\\\/\\\\/content-auto\\.ru\\\\/images\\\\/${idPattern}\\\\/[^"]+\\.webp)"`, 'i'));
+  if (galleryMiddleMatch) return galleryMiddleMatch[1].replace(/\\\//g, '/');
+
+  const anyContentAutoMatch = String(html || '').match(new RegExp(`(${contentAutoPattern})`, 'i'));
+  return anyContentAutoMatch ? anyContentAutoMatch[1] : '';
 }
 
 function parseSiteCatalogCount_(html) {
@@ -651,10 +686,19 @@ function extractMetaContent_(html, attrName, attrValue) {
 
 function extractFirstImageUrl_(html, baseUrl) {
   const block = String(html || '');
+  const productId = extractProductIdFromUrl_(block) || extractProductIdFromHtml_(block);
+  const productImage = extractProductImageUrl_(block, productId);
+  if (productImage) return productImage;
+
   const displayBlockMatch = block.match(/<div\b[^>]*class=["'][^"']*car-in-image[^"']*["'][^>]*style=["'][^"']*display:\s*block[^"']*["'][^>]*>[\s\S]*?<img\b[^>]*(?:data-src|src)=["']([^"']+)["']/i);
   const imageMatch = displayBlockMatch || block.match(/<img\b[^>]*(?:data-src|src)=["']([^"']+)["'][^>]*>/i);
   if (!imageMatch) return '';
   return absoluteUrl_(imageMatch[1], baseUrl || CATALOG_URL);
+}
+
+function extractProductIdFromUrl_(value) {
+  const match = String(value || '').match(/\/avtomobili_s_probegom\/[^"'\s?#]+\/[^"'\s?#]+\/(\d+)(?:[?#][^"'\s]*)?/i);
+  return match ? match[1] : '';
 }
 
 function mergeCar_(existing, incoming) {
