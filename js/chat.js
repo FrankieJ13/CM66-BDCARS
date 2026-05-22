@@ -200,6 +200,7 @@
 
     if (/(млн|мил|million|\bm\b|м\b)/i.test(text)) return Math.round(value * 1000000);
     if (/(тыс|тр|\bк\b|\bk\b)/i.test(text)) return Math.round(value * 1000);
+    if (hasDecimal && value < 100) return Math.round(value * 1000000);
     if (value < 10000 && !hasDecimal) return Math.round(value * 1000);
     return Math.round(value);
   }
@@ -215,7 +216,7 @@
   }
 
   function carSearchText(car) {
-    const base = normalizeText([car.brand, car.model, car.title, car.city, car.mileage, car.body, car.engine, car.drive, car.power, car.transmission, car.wheel].join(" "));
+    const base = normalizeText([car.brand, car.model, car.title, car.year, car.city, car.mileage, car.body, car.engine, car.drive, car.power, car.transmission, car.wheel].join(" "));
     const extra = [];
     for (const [alias, entry] of aliasIndex.entries()) {
       if (base.includes(alias)) extra.push(entry.name, entry.slug, entry.host, ...entry.variants);
