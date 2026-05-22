@@ -165,7 +165,8 @@
       transmission,
       terms: searchable,
       canonicalTerms: searchable.map(canonicalToken),
-      expandedTerms: searchable.map(expandToken)
+      expandedTerms: searchable.map(expandToken),
+      termMatches: searchable.map(buildTermMatch)
     };
   }
 
@@ -305,6 +306,16 @@
     return entry ? entry.variants : [normalizeText(token)];
   }
 
+  function buildTermMatch(token) {
+    const normalized = normalizeText(token);
+    const entry = aliasIndex.get(normalized);
+    return {
+      token: normalized,
+      type: entry?.type || "text",
+      variants: entry ? entry.variants : [normalized]
+    };
+  }
+
   function carSearchText(car) {
     const base = normalizeText([car.brand, car.model, car.title, car.year, car.city, car.mileage, car.body, car.engine, car.drive, car.power, car.transmission, car.wheel].join(" "));
     const extra = [];
@@ -322,14 +333,36 @@
     if (parsed.transmission && !transmissionMatches(car.transmission, parsed.transmission)) return -1;
     if (parsed.drive && !driveMatches(car.drive, parsed.drive)) return -1;
 
-    for (const variants of parsed.expandedTerms) {
-      if (!variants.some((term) => text.includes(term))) return -1;
+    for (const match of parsed.termMatches) {
+      if (!termMatchesCar(car, text, match)) return -1;
       score += 4;
     }
 
     if (parsed.budget && car.price) score += Math.max(0, 3 - Math.floor((parsed.budget - car.price) / 200000));
     if (parsed.mileage && car.mileage) score += Math.max(0, 3 - Math.floor((parsed.mileage - parseMileageField(car.mileage)) / 30000));
     return score;
+  }
+
+  function termMatchesCar(car, fullText, match) {
+    if (match.type === "brand") {
+      return variantsMatchText(match.variants, [car.brand, car.title].join(" "));
+    }
+    if (match.type === "model") {
+      return variantsMatchText(match.variants, [car.model, car.title].join(" "));
+    }
+    if (match.type === "city") {
+      return variantsMatchText(match.variants, car.city);
+    }
+    return match.variants.some((term) => fullText.includes(term));
+  }
+
+  function variantsMatchText(variants, value) {
+    const text = ` ${normalizeText(value)} `;
+    return variants.some((variant) => {
+      const normalized = normalizeText(variant);
+      if (!normalized) return false;
+      return text.includes(` ${normalized} `) || text.includes(` ${normalized.replace(/\s+/g, "")} `);
+    });
   }
 
   function parseMileageField(value) {
