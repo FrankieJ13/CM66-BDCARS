@@ -263,7 +263,7 @@
   const manualModelAliases = {
     "Tiguan": ["тигуан", "тиг"], "Polo": ["поло"], "Passat": ["пассат", "пасат"], "Jetta": ["джетта", "джета"],
     "Touareg": ["туарег", "таурег"], "Vesta": ["веста"], "Granta": ["гранта"], "Camry": ["камри"],
-    "Corolla": ["королла", "корола"], "RAV4": ["rav", "рав4", "рав", "рав 4"], "Rio": ["рио"],
+    "Corolla": ["королла", "корола"], "Corolla Cross": ["королла кросс", "корола кросс"], "RAV4": ["rav", "рав4", "рав", "рав 4"], "Rio": ["рио"],
     "Sportage": ["спортейдж", "спортаж"], "Solaris": ["солярис"], "Creta": ["крета"], "Logan": ["логан"],
     "Duster": ["дастер"], "Focus": ["фокус"], "Octavia": ["октавия"], "X-Trail": ["икстрейл", "икс трейл"],
     "Qashqai": ["кашкай", "кашкай"], "Priora": ["приора"], "Kalina": ["калина"], "Largus": ["ларгус"],
@@ -324,7 +324,7 @@
     "Vista Ardeo": ["виста ардео", "тойота виста ардео"],
     "Atenza": ["атенза", "мазда атенза"],
     "Nadia": ["надя", "тойота надя"],
-    "Corolla Runx": ["королла ранкс", "ранкс"],
+    "Corolla Runx": ["королла ранкс", "корола ранкс", "ранкс"],
     "Passo": ["пассо", "пасо"],
     "X-Trail": ["икс трейл", "икстрейл", "х трейл", "x trail", "x-trail"],
     "Odyssey": ["одиссей", "хонда одиссей"],
@@ -339,7 +339,7 @@
     "on-DO": ["он до", "он-до", "ондo", "датсун он до"],
     "Ipsum": ["ипсум", "тойота ипсум"],
     "Tiida Latio": ["тиида латио", "тида латио"],
-    "Corolla Fielder": ["королла филдер", "филдер"],
+    "Corolla Fielder": ["королла филдер", "корола филдер", "филдер"],
     "Teana": ["теана", "тиана"],
     "Passat": ["пассат", "пасат", "фольксваген пассат"],
     "Tucson": ["туссан", "туксон", "тюксон"],
@@ -406,7 +406,7 @@
     "Zafira": ["зафира"],
     "Kizashi": ["кизаши"],
     "Mark II": ["марк 2", "марк ii", "марк два"],
-    "Corolla Axio": ["королла аксио", "аксио"],
+    "Corolla Axio": ["королла аксио", "корола аксио", "аксио"],
     "Tribeca": ["трайбека"],
     "Ractis": ["рактис"],
     "Move": ["мув", "дайхатсу мув"],
@@ -486,7 +486,7 @@
     "Delica D5": ["делика д5", "delica d5"],
     "Platz": ["платц"],
     "Boon": ["бун"],
-    "Spacio": ["королла спасио", "спасио"],
+    "Spacio": ["королла спасио", "корола спасио", "спасио"],
     "mi-DO": ["ми до", "ми-до"],
     "Altezza": ["алтезза"],
     "Legend": ["легенд", "легенда"],
@@ -520,7 +520,7 @@
     "UNI-S": ["юни-с", "юни с", "uni-s"],
     "Amarok": ["амарок"],
     "H-1": ["н-1", "h-1", "старекс"],
-    "Corolla Cross": ["королла кросс"],
+    "Corolla Cross": ["королла кросс", "корола кросс"],
     "Vellfire": ["веллфайр", "велфайр"],
     "J8": ["j8", "джейку j8", "джейку j8"],
     "Palisade": ["палисад"],
@@ -696,6 +696,21 @@
   Object.entries(extraManualModelAliases).forEach(([model, aliases]) => {
     const item = modelMap.get(slugify(model));
     if (item) item.aliases = uniq([...item.aliases, ...makeAliases(model, aliases)]);
+  });
+
+  const finalModelAliases = {
+    "corolla": ["корола"],
+    "corolla-cross": ["корола кросс"],
+    "corolla-runx": ["корола ранкс"],
+    "corolla-fielder": ["корола филдер"],
+    "corolla-axio": ["корола аксио"],
+    "corolla-verso": ["корола версо"],
+    "spacio": ["корола спасио"]
+  };
+
+  Object.entries(finalModelAliases).forEach(([slug, aliases]) => {
+    const item = modelMap.get(slug);
+    if (item) item.aliases = uniq([...item.aliases, ...aliases, ...aliases.map((alias) => alias.replace(/\s+/g, ""))]);
   });
 
   // Extra common ambiguous numeric model shortcuts. They help with queries like "мазда 3", "ауди а6", "танк 300".
