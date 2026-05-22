@@ -32,6 +32,7 @@
       description: "Скачать JSON за последний час"
     }
   ];
+  const resultPageSize = Math.max(12, Number(config.maxResults) || 12);
   const state = { cars: [], awaitingFontSize: false, replyTimers: [], replySequence: 0 };
 
   const els = {
@@ -405,7 +406,6 @@
 
   function searchCars(query) {
     const parsed = parseQuery(query);
-    const limit = parsed.expensiveIntent ? 8 : (config.maxResults || 5);
     const cars = state.cars
       .map((car) => ({ car, score: scoreCar(car, parsed) }))
       .filter((item) => item.score >= 0)
@@ -413,7 +413,6 @@
         if (parsed.expensiveIntent) return (b.car.price || 0) - (a.car.price || 0) || b.score - a.score;
         return b.score - a.score || a.car.price - b.car.price;
       })
-      .slice(0, limit)
       .map((item) => item.car);
 
     return { parsed, cars };
@@ -455,6 +454,7 @@
   function renderAssistantReply(query, anchorMessage = null) {
     cancelPendingReplyAnimation();
     const { parsed, cars } = searchCars(query);
+    const visibleCars = cars.slice(0, resultPageSize);
     recordSearchLog({
       type: "search",
       query,
@@ -467,7 +467,8 @@
       drive: parsed.drive || "",
       transmission: parsed.transmission || "",
       results_count: cars.length,
-      results: cars.slice(0, 10).map(formatCarLogItem)
+      shown_count: visibleCars.length,
+      results: visibleCars.map(formatCarLogItem)
     });
     const chips = parsed.canonicalTerms.map((term) => `<span class="chip">${escapeHtml(term)}</span>`);
     if (parsed.cheapIntent) chips.push('<span class="chip">самые дешевые</span>');
@@ -483,9 +484,36 @@
       return;
     }
 
-    const message = addMessage("assistant", `<p>Нашел ${cars.length} ${plural(cars.length, ["вариант", "варианта", "вариантов"])}.</p>${renderChips(chips)}<div class="result-list is-streaming"></div>`, { scroll: false });
-    streamResultCards(message, cars);
+    const summary = cars.length > visibleCars.length
+      ? `Нашел ${cars.length} ${plural(cars.length, ["вариант", "варианта", "вариантов"])}. Показал первые ${visibleCars.length} лучших совпадений.`
+      : `Нашел ${cars.length} ${plural(cars.length, ["вариант", "варианта", "вариантов"])}.`;
+    const message = addMessage("assistant", `<p>${summary}</p>${renderChips(chips)}<div class="result-list is-streaming"></div>${renderMoreButton(query, visibleCars.length, cars.length)}`, { scroll: false });
+    streamResultCards(message, visibleCars);
     scrollConversationStart(anchorMessage);
+  }
+
+  function renderMoreResults(query, offset) {
+    cancelPendingReplyAnimation();
+    const { cars } = searchCars(query);
+    const start = Math.max(0, Number(offset) || 0);
+    const nextCars = cars.slice(start, start + resultPageSize);
+    if (!nextCars.length) {
+      addMessage("assistant", "<p>Больше подходящих авто в списке нет.</p>");
+      return;
+    }
+
+    const nextOffset = start + nextCars.length;
+    recordSearchLog({
+      type: "show_more",
+      query,
+      offset: start,
+      results_count: cars.length,
+      shown_count: nextCars.length,
+      results: nextCars.map(formatCarLogItem)
+    });
+    const message = addMessage("assistant", `<p>Продолжаю список: ${start + 1}-${nextOffset} из ${cars.length}.</p><div class="result-list is-streaming"></div>${renderMoreButton(query, nextOffset, cars.length)}`, { scroll: false });
+    streamResultCards(message, nextCars);
+    scrollConversationStart(message);
   }
 
   function cancelPendingReplyAnimation() {
@@ -512,6 +540,19 @@
       }, interval * index);
       state.replyTimers.push(timer);
     });
+  }
+
+  function renderMoreButton(query, offset, total) {
+    if (offset >= total) return "";
+    const remaining = total - offset;
+    const nextCount = Math.min(resultPageSize, remaining);
+    return `
+      <div class="reply-actions">
+        <button type="button" class="show-more-cars" data-more-query="${escapeHtml(query)}" data-more-offset="${offset}">
+          Показать еще ${nextCount}
+        </button>
+      </div>
+    `;
   }
 
   function renderResultCard(car) {
@@ -926,6 +967,14 @@
   });
 
   els.window.addEventListener("click", (event) => {
+    const moreButton = event.target.closest("[data-more-query]");
+    if (moreButton) {
+      moreButton.disabled = true;
+      moreButton.closest(".reply-actions")?.remove();
+      renderMoreResults(moreButton.dataset.moreQuery || "", Number(moreButton.dataset.moreOffset) || 0);
+      return;
+    }
+
     const button = event.target.closest("[data-command]");
     if (button) {
       els.input.value = button.dataset.command;
