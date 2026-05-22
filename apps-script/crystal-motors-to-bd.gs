@@ -9,6 +9,7 @@ const CATALOG_PAGE_SIZE = 24;
 const PAGES_PER_RUN = 18;
 const DAY_INCREMENTAL_PAGES = 12;
 const DETAILS_PER_RUN = 25;
+const DETAILS_MAX_RETRY_PASSES = 3;
 const REQUEST_PAUSE_MS = 450;
 const NEXT_BATCH_DELAY_MS = 60 * 1000;
 const FETCH_RETRIES = 3;
@@ -154,6 +155,8 @@ function startFullCatalogRefresh_(force) {
   properties.setProperty('next_page', '1');
   properties.setProperty('sync_mode', 'full');
   properties.deleteProperty('details_next_row');
+  properties.deleteProperty('details_retry_pass');
+  properties.deleteProperty('details_failed_in_pass');
   deleteExistingTriggers_(['scheduledRefreshCrystalMotorsCatalog', 'scheduledCarDetailsEnrichment']);
   clearBufferedCars_();
   logSync_('refresh_start', 'OK', 'Full refresh started from page 1, buffer cleared');
@@ -230,6 +233,8 @@ function refreshCrystalMotorsCatalog() {
     writeCarsToSheet_(Array.from(found.values()));
     properties.setProperty('last_refresh_at', String(Date.now()));
     properties.setProperty('details_next_row', '2');
+    properties.setProperty('details_retry_pass', '0');
+    properties.setProperty('details_failed_in_pass', '0');
     properties.deleteProperty('next_page');
     properties.deleteProperty('sync_mode');
     setSyncState_(SYNC_STATE_DETAILS);
@@ -344,6 +349,8 @@ function restartCarDetailsEnrichment() {
   properties.deleteProperty('next_page');
   properties.deleteProperty('sync_mode');
   properties.setProperty('details_next_row', '2');
+  properties.setProperty('details_retry_pass', '0');
+  properties.setProperty('details_failed_in_pass', '0');
   setSyncState_(SYNC_STATE_DETAILS);
   enrichCarDetailsBatch();
 }
@@ -353,6 +360,8 @@ function resetCatalogSyncProgress() {
   properties.deleteProperty('next_page');
   properties.deleteProperty('sync_mode');
   properties.deleteProperty('details_next_row');
+  properties.deleteProperty('details_retry_pass');
+  properties.deleteProperty('details_failed_in_pass');
   setSyncState_(SYNC_STATE_IDLE);
   deleteExistingTriggers_(['scheduledRefreshCrystalMotorsCatalog', 'scheduledCarDetailsEnrichment']);
   clearBufferedCars_();
@@ -476,12 +485,18 @@ function enrichCarDetailsBatch() {
       scheduleNextCatalogBatch_();
       return;
     }
-    if (state !== SYNC_STATE_DETAILS) setSyncState_(SYNC_STATE_DETAILS);
+    if (state !== SYNC_STATE_DETAILS) {
+      setSyncState_(SYNC_STATE_DETAILS);
+      properties.setProperty('details_retry_pass', '0');
+      properties.setProperty('details_failed_in_pass', '0');
+    }
 
     const sheet = getCarsSheet_();
     const values = sheet.getDataRange().getValues();
     if (values.length < 2) {
       properties.deleteProperty('details_next_row');
+      properties.deleteProperty('details_retry_pass');
+      properties.deleteProperty('details_failed_in_pass');
       setSyncState_(SYNC_STATE_IDLE);
       logSync_('details_batch', 'EMPTY', 'BD is empty');
       return;
@@ -499,7 +514,7 @@ function enrichCarDetailsBatch() {
     while (rowNumber <= updatedValues.length && requests.length < DETAILS_PER_RUN) {
       const row = updatedValues[rowNumber - 1];
       const url = row[index.url];
-      const needsDetails = url && (!row[index.body] || !row[index.engine] || !row[index.drive] || !row[index.power] || !row[index.wheel] || !row[index.image_url]);
+      const needsDetails = rowNeedsDetails_(row, index);
       if (needsDetails) {
         requests.push({
           url,
@@ -513,10 +528,7 @@ function enrichCarDetailsBatch() {
     }
 
     if (!requests.length) {
-      properties.deleteProperty('details_next_row');
-      deleteExistingTriggers_('scheduledCarDetailsEnrichment');
-      setSyncState_(SYNC_STATE_IDLE);
-      logSync_('details', 'OK', 'All visible rows already have details');
+      finishDetailsPass_(sheet, index, 0);
       return;
     }
 
@@ -531,6 +543,7 @@ function enrichCarDetailsBatch() {
         const code = response.getResponseCode();
         if (code < 200 || code >= 300) {
           failed += 1;
+          logSync_('details_row', 'SKIP', `Row ${rowNumbers[requestIndex]} skipped: HTTP ${code}`);
           return;
         }
 
@@ -551,11 +564,10 @@ function enrichCarDetailsBatch() {
       sheet.getRange(update.rowNumber, 1, 1, updatedHeaders.length).setValues([update.row]);
     });
 
+    properties.setProperty('details_failed_in_pass', String(Number(properties.getProperty('details_failed_in_pass') || 0) + failed));
+
     if (rowNumber > updatedValues.length) {
-      properties.deleteProperty('details_next_row');
-      deleteExistingTriggers_('scheduledCarDetailsEnrichment');
-      setSyncState_(SYNC_STATE_IDLE);
-      logSync_('details', 'OK', `${updates.length} cars enriched, details pass finished`);
+      finishDetailsPass_(sheet, index, updates.length);
       return;
     }
 
@@ -571,6 +583,47 @@ function enrichCarDetailsBatch() {
     }
     throw error;
   }
+}
+
+function rowNeedsDetails_(row, index) {
+  if (index.url < 0 || !row[index.url]) return false;
+  return ['mileage', 'body', 'engine', 'drive', 'power', 'transmission', 'wheel', 'image_url']
+    .some((header) => index[header] >= 0 && !row[index[header]]);
+}
+
+function countRowsNeedingDetails_(values, index) {
+  return values.slice(1).filter((row) => rowNeedsDetails_(row, index)).length;
+}
+
+function finishDetailsPass_(sheet, index, enrichedCount) {
+  const properties = PropertiesService.getScriptProperties();
+  const values = sheet.getDataRange().getValues();
+  const missing = countRowsNeedingDetails_(values, index);
+  const failedInPass = Number(properties.getProperty('details_failed_in_pass') || 0);
+  const retryPass = Number(properties.getProperty('details_retry_pass') || 0);
+
+  if (missing > 0 && retryPass < DETAILS_MAX_RETRY_PASSES) {
+    properties.setProperty('details_next_row', '2');
+    properties.setProperty('details_retry_pass', String(retryPass + 1));
+    properties.setProperty('details_failed_in_pass', '0');
+    setSyncState_(SYNC_STATE_DETAILS);
+    scheduleNextDetailsBatch_();
+    logSync_('details', 'RETRY_PASS', `${missing} rows still need details, ${failedInPass} failed in this pass. Retry pass ${retryPass + 1}/${DETAILS_MAX_RETRY_PASSES} scheduled from row 2`);
+    return;
+  }
+
+  properties.deleteProperty('details_next_row');
+  properties.deleteProperty('details_retry_pass');
+  properties.deleteProperty('details_failed_in_pass');
+  deleteExistingTriggers_('scheduledCarDetailsEnrichment');
+  setSyncState_(SYNC_STATE_IDLE);
+
+  if (missing > 0) {
+    logSync_('details', 'WARN', `${missing} rows still missing details after ${DETAILS_MAX_RETRY_PASSES} retry passes. Last batch enriched ${enrichedCount}, failed in pass ${failedInPass}`);
+    return;
+  }
+
+  logSync_('details', 'OK', `${enrichedCount} cars enriched, all rows have details`);
 }
 
 function ensureSheetHeaders_(sheet, headers) {
