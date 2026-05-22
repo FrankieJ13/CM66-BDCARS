@@ -21,6 +21,9 @@ const NIGHTLY_COUNT_CHECK_MINUTE = 50;
 const SITE_COUNT_TOLERANCE = 40;
 const FULL_REFRESH_COOLDOWN_MS = 20 * 60 * 60 * 1000;
 const ASSISTANT_URL = 'https://frankiej13.github.io/CM66-BDCARS/';
+const SYNC_STATE_IDLE = 'idle';
+const SYNC_STATE_FULL = 'full_catalog';
+const SYNC_STATE_DETAILS = 'details';
 
 function onOpen() {
   SpreadsheetApp.getUi()
@@ -107,6 +110,9 @@ function setupCrystalMotorsSync() {
     'scheduledNightlyCatalogCountCheck'
   ]);
   createCrystalMotorsTrigger();
+  const state = getSyncState_();
+  if (state === SYNC_STATE_FULL && PropertiesService.getScriptProperties().getProperty('next_page')) scheduleNextCatalogBatch_();
+  if (state === SYNC_STATE_DETAILS && PropertiesService.getScriptProperties().getProperty('details_next_row')) scheduleNextDetailsBatch_();
   logSync_('setup', 'OK', 'Headers created. Daytime 3h incremental, 21:00 full refresh, 23:50 count check installed.');
 }
 
@@ -115,18 +121,36 @@ function setupAndRefreshCrystalMotorsSync() {
   startFullCatalogRefresh();
 }
 
+function getSyncState_() {
+  const properties = PropertiesService.getScriptProperties();
+  const state = properties.getProperty('sync_state');
+  if (state === SYNC_STATE_FULL && properties.getProperty('next_page')) return SYNC_STATE_FULL;
+  if (state === SYNC_STATE_DETAILS && properties.getProperty('details_next_row')) return SYNC_STATE_DETAILS;
+  if (state === SYNC_STATE_IDLE) return SYNC_STATE_IDLE;
+  if (properties.getProperty('next_page')) return SYNC_STATE_FULL;
+  if (properties.getProperty('details_next_row')) return SYNC_STATE_DETAILS;
+  return SYNC_STATE_IDLE;
+}
+
+function setSyncState_(state) {
+  PropertiesService.getScriptProperties().setProperty('sync_state', state);
+}
+
 function startFullCatalogRefresh() {
   startFullCatalogRefresh_(true);
 }
 
 function startFullCatalogRefresh_(force) {
   const properties = PropertiesService.getScriptProperties();
-  if (!force && properties.getProperty('details_next_row')) {
-    logSync_('refresh_start', 'SKIP', `Details enrichment is active at row ${properties.getProperty('details_next_row')}`);
-    scheduleNextDetailsBatch_();
+  const state = getSyncState_();
+  if (!force && state !== SYNC_STATE_IDLE) {
+    logSync_('refresh_start', 'SKIP', `Sync state is ${state}`);
+    if (state === SYNC_STATE_FULL && properties.getProperty('next_page')) scheduleNextCatalogBatch_();
+    if (state === SYNC_STATE_DETAILS && properties.getProperty('details_next_row')) scheduleNextDetailsBatch_();
     return;
   }
 
+  setSyncState_(SYNC_STATE_FULL);
   properties.setProperty('next_page', '1');
   properties.setProperty('sync_mode', 'full');
   properties.deleteProperty('details_next_row');
@@ -144,10 +168,19 @@ function forceStartFullCatalogRefresh_() {
 
 function continueCatalogRefresh() {
   const properties = PropertiesService.getScriptProperties();
+  const state = getSyncState_();
+  if (state === SYNC_STATE_DETAILS) {
+    logSync_('refresh_continue', 'SKIP', `Details enrichment is active at row ${properties.getProperty('details_next_row') || 2}`);
+    scheduleNextDetailsBatch_();
+    return;
+  }
   if (!properties.getProperty('next_page')) {
+    setSyncState_(SYNC_STATE_FULL);
     properties.setProperty('next_page', '1');
     properties.setProperty('sync_mode', 'full');
     logSync_('refresh_continue', 'START', 'No active full refresh found, started from page 1');
+  } else if (state !== SYNC_STATE_FULL) {
+    setSyncState_(SYNC_STATE_FULL);
   }
   refreshCrystalMotorsCatalog();
 }
@@ -155,8 +188,11 @@ function continueCatalogRefresh() {
 function refreshCrystalMotorsCatalog() {
   try {
     const properties = PropertiesService.getScriptProperties();
+    if (getSyncState_() !== SYNC_STATE_FULL) {
+      logSync_('refresh_batch', 'SKIP', `Catalog batch skipped, sync state is ${getSyncState_()}`);
+      return;
+    }
     const startPage = Number(properties.getProperty('next_page') || 1);
-    const syncMode = properties.getProperty('sync_mode') || 'full';
     const existingCars = readBufferedCars_();
     const found = new Map(existingCars.map((car) => [car.url, car]));
     let nextPage = startPage;
@@ -196,13 +232,14 @@ function refreshCrystalMotorsCatalog() {
     properties.setProperty('details_next_row', '2');
     properties.deleteProperty('next_page');
     properties.deleteProperty('sync_mode');
+    setSyncState_(SYNC_STATE_DETAILS);
     clearBufferedCars_();
     deleteExistingTriggers_('scheduledRefreshCrystalMotorsCatalog');
     scheduleNextDetailsBatch_();
     logSync_('refresh', 'OK', `${found.size} cars written from full catalog in batches`);
   } catch (error) {
     logSync_('refresh', 'ERROR', error.stack || error.message);
-    if (PropertiesService.getScriptProperties().getProperty('next_page')) {
+    if (getSyncState_() === SYNC_STATE_FULL && PropertiesService.getScriptProperties().getProperty('next_page')) {
       scheduleNextCatalogBatch_();
       logSync_('refresh_batch', 'RETRY', `Catalog batch failed, retry scheduled from page ${PropertiesService.getScriptProperties().getProperty('next_page')}`);
       return;
@@ -243,31 +280,26 @@ function createCrystalMotorsTrigger() {
 
 function scheduledRefreshCrystalMotorsCatalog() {
   const properties = PropertiesService.getScriptProperties();
-  const hasActiveBatch = Boolean(properties.getProperty('next_page'));
-  if (hasActiveBatch) {
+  const state = getSyncState_();
+  if (state === SYNC_STATE_FULL && properties.getProperty('next_page')) {
     refreshCrystalMotorsCatalog();
     return;
   }
 
-  const hasActiveDetailsBatch = Boolean(properties.getProperty('details_next_row'));
-  if (hasActiveDetailsBatch) {
-    enrichCarDetailsBatch();
-    return;
-  }
-
   deleteExistingTriggers_('scheduledRefreshCrystalMotorsCatalog');
-  logSync_('refresh_batch', 'SKIP', 'No active catalog or details batch');
+  logSync_('refresh_batch', 'SKIP', `No active catalog batch, sync state is ${state}`);
 }
 
 function scheduledCarDetailsEnrichment() {
-  const hasActiveDetailsBatch = Boolean(PropertiesService.getScriptProperties().getProperty('details_next_row'));
-  if (hasActiveDetailsBatch) {
+  const properties = PropertiesService.getScriptProperties();
+  const state = getSyncState_();
+  if (state === SYNC_STATE_DETAILS && properties.getProperty('details_next_row')) {
     enrichCarDetailsBatch();
     return;
   }
 
   deleteExistingTriggers_('scheduledCarDetailsEnrichment');
-  logSync_('details_batch', 'SKIP', 'No active details batch');
+  logSync_('details_batch', 'SKIP', `No active details batch, sync state is ${state}`);
 }
 
 function scheduledDaytimeIncrementalCatalogSync() {
@@ -276,8 +308,9 @@ function scheduledDaytimeIncrementalCatalogSync() {
     logSync_('incremental', 'SKIP', `Outside daytime window: ${hour}:00`);
     return;
   }
-  if (PropertiesService.getScriptProperties().getProperty('next_page')) {
-    logSync_('incremental', 'SKIP', 'Full refresh is active');
+  const state = getSyncState_();
+  if (state !== SYNC_STATE_IDLE) {
+    logSync_('incremental', 'SKIP', `Sync state is ${state}`);
     return;
   }
   incrementalRefreshCrystalMotorsCatalog();
@@ -285,6 +318,13 @@ function scheduledDaytimeIncrementalCatalogSync() {
 
 function scheduledNightlyFullCatalogRefresh() {
   const properties = PropertiesService.getScriptProperties();
+  const state = getSyncState_();
+  if (state !== SYNC_STATE_IDLE) {
+    logSync_('refresh_start', 'SKIP', `Sync state is ${state}`);
+    if (state === SYNC_STATE_FULL && properties.getProperty('next_page')) scheduleNextCatalogBatch_();
+    if (state === SYNC_STATE_DETAILS && properties.getProperty('details_next_row')) scheduleNextDetailsBatch_();
+    return;
+  }
   const lastRefreshAt = Number(properties.getProperty('last_refresh_at') || 0);
   if (lastRefreshAt && Date.now() - lastRefreshAt < FULL_REFRESH_COOLDOWN_MS) {
     logSync_('refresh_start', 'SKIP', 'Recent full refresh already finished, cooldown active');
@@ -299,8 +339,12 @@ function scheduledNightlyCatalogCountCheck() {
 }
 
 function restartCarDetailsEnrichment() {
-  deleteExistingTriggers_('scheduledCarDetailsEnrichment');
-  PropertiesService.getScriptProperties().setProperty('details_next_row', '2');
+  deleteExistingTriggers_(['scheduledRefreshCrystalMotorsCatalog', 'scheduledCarDetailsEnrichment']);
+  const properties = PropertiesService.getScriptProperties();
+  properties.deleteProperty('next_page');
+  properties.deleteProperty('sync_mode');
+  properties.setProperty('details_next_row', '2');
+  setSyncState_(SYNC_STATE_DETAILS);
   enrichCarDetailsBatch();
 }
 
@@ -309,6 +353,7 @@ function resetCatalogSyncProgress() {
   properties.deleteProperty('next_page');
   properties.deleteProperty('sync_mode');
   properties.deleteProperty('details_next_row');
+  setSyncState_(SYNC_STATE_IDLE);
   deleteExistingTriggers_(['scheduledRefreshCrystalMotorsCatalog', 'scheduledCarDetailsEnrichment']);
   clearBufferedCars_();
   logSync_('reset', 'OK', 'Catalog sync progress cleared');
@@ -354,8 +399,8 @@ function writeCarsToSheet_(cars) {
 
 function incrementalRefreshCrystalMotorsCatalog() {
   try {
-    if (PropertiesService.getScriptProperties().getProperty('next_page')) {
-      logSync_('incremental', 'SKIP', `Full refresh is active, next page ${PropertiesService.getScriptProperties().getProperty('next_page')}. Continue or reset full refresh first.`);
+    if (getSyncState_() !== SYNC_STATE_IDLE) {
+      logSync_('incremental', 'SKIP', `Sync state is ${getSyncState_()}`);
       return;
     }
 
@@ -391,9 +436,10 @@ function verifyCatalogCount() {
     const siteCount = parseSiteCatalogCount_(fetchText_(CATALOG_URL));
     const sheetCount = Math.max(0, getCarsSheet_().getLastRow() - 1);
     const difference = siteCount ? siteCount - sheetCount : 0;
-    const fullRefreshActive = Boolean(properties.getProperty('next_page'));
-    const status = fullRefreshActive || (siteCount && Math.abs(difference) > SITE_COUNT_TOLERANCE) ? 'WARN' : 'OK';
-    const activeMessage = fullRefreshActive ? ` Full refresh still active, next page ${properties.getProperty('next_page')}.` : '';
+    const state = getSyncState_();
+    const syncActive = state !== SYNC_STATE_IDLE;
+    const status = syncActive || (siteCount && Math.abs(difference) > SITE_COUNT_TOLERANCE) ? 'WARN' : 'OK';
+    const activeMessage = syncActive ? ` Sync state: ${state}. Catalog page: ${properties.getProperty('next_page') || '-'}, details row: ${properties.getProperty('details_next_row') || '-'}.` : '';
     logSync_('count_check', status, `Site count: ${siteCount || 'unknown'}, BD rows: ${sheetCount}, difference: ${difference}.${activeMessage}`);
   } catch (error) {
     logSync_('count_check', 'ERROR', error.stack || error.message);
@@ -423,9 +469,20 @@ function readCarsFromSheet_() {
 
 function enrichCarDetailsBatch() {
   try {
+    const properties = PropertiesService.getScriptProperties();
+    const state = getSyncState_();
+    if (state === SYNC_STATE_FULL || properties.getProperty('next_page')) {
+      logSync_('details_batch', 'SKIP', `Full catalog refresh is active, next page ${properties.getProperty('next_page') || '-'}`);
+      scheduleNextCatalogBatch_();
+      return;
+    }
+    if (state !== SYNC_STATE_DETAILS) setSyncState_(SYNC_STATE_DETAILS);
+
     const sheet = getCarsSheet_();
     const values = sheet.getDataRange().getValues();
     if (values.length < 2) {
+      properties.deleteProperty('details_next_row');
+      setSyncState_(SYNC_STATE_IDLE);
       logSync_('details_batch', 'EMPTY', 'BD is empty');
       return;
     }
@@ -435,7 +492,6 @@ function enrichCarDetailsBatch() {
     const updatedValues = sheet.getDataRange().getValues();
     const updatedHeaders = updatedValues[0].map((value) => String(value).trim());
     const index = headerIndex_(updatedHeaders);
-    const properties = PropertiesService.getScriptProperties();
     let rowNumber = Number(properties.getProperty('details_next_row') || 2);
     const requests = [];
     const rowNumbers = [];
@@ -459,6 +515,7 @@ function enrichCarDetailsBatch() {
     if (!requests.length) {
       properties.deleteProperty('details_next_row');
       deleteExistingTriggers_('scheduledCarDetailsEnrichment');
+      setSyncState_(SYNC_STATE_IDLE);
       logSync_('details', 'OK', 'All visible rows already have details');
       return;
     }
@@ -497,6 +554,7 @@ function enrichCarDetailsBatch() {
     if (rowNumber > updatedValues.length) {
       properties.deleteProperty('details_next_row');
       deleteExistingTriggers_('scheduledCarDetailsEnrichment');
+      setSyncState_(SYNC_STATE_IDLE);
       logSync_('details', 'OK', `${updates.length} cars enriched, details pass finished`);
       return;
     }
@@ -506,7 +564,7 @@ function enrichCarDetailsBatch() {
     logSync_('details_batch', 'CONTINUE', `${updates.length} cars enriched, ${failed} failed, next row ${rowNumber}`);
   } catch (error) {
     logSync_('details', 'ERROR', error.stack || error.message);
-    if (PropertiesService.getScriptProperties().getProperty('details_next_row')) {
+    if (getSyncState_() === SYNC_STATE_DETAILS && PropertiesService.getScriptProperties().getProperty('details_next_row')) {
       scheduleNextDetailsBatch_();
       logSync_('details_batch', 'RETRY', `Details batch failed, retry scheduled from row ${PropertiesService.getScriptProperties().getProperty('details_next_row')}`);
       return;
