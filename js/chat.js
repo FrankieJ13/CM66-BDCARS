@@ -134,10 +134,12 @@
   }
 
   function parseQuery(rawQuery) {
+    const cheapIntent = extractCheapIntent(rawQuery);
     const mileage = extractMileage(rawQuery);
-    const budget = extractBudget(removeMileagePhrases(rawQuery));
+    const explicitBudget = extractBudget(removeMileagePhrases(rawQuery));
+    const budget = explicitBudget || (cheapIntent ? 200000 : null);
     const drive = extractDrive(rawQuery);
-    const query = compactKnownPhrases(normalizeText(removeDrivePhrases(removeBudgetPhrases(removeMileagePhrases(rawQuery)))));
+    const query = compactKnownPhrases(normalizeText(removeCheapIntentPhrases(removeDrivePhrases(removeBudgetPhrases(removeMileagePhrases(rawQuery))))));
     const automaticWords = dictionary.transmissions?.automatic || [];
     const manualWords = dictionary.transmissions?.manual || [];
     const stopWords = dictionary.stopWords || [];
@@ -157,6 +159,7 @@
 
     return {
       budget,
+      cheapIntent,
       mileage,
       drive,
       transmission,
@@ -200,6 +203,20 @@
     return String(query || "")
       .replace(getDrivePattern(), " ")
       .replace(/\s+/g, " ");
+  }
+
+  function removeCheapIntentPhrases(query) {
+    return String(query || "")
+      .replace(getCheapIntentPattern(), " ")
+      .replace(/\s+/g, " ");
+  }
+
+  function getCheapIntentPattern() {
+    return /(?:ржав(?:ое|ую|ый|ые|ого|еньк(?:ое|ую|ий|ие))?|ржавая|ржавчина|корыто|корытце|тазик|таз|ведро|дрова|дровишки|груда\s+металла|кусок\s+металла|металлолом|чермет|утиль|хлам|автохлам|развалюха|старье|старьё|помойка|помоечка|убит(?:ое|ую|ый|ые)|уставш(?:ее|ую|ий|ие)|живой\s+труп|на\s+ходу\s+и\s+ладно|сам(?:ое|ую|ый)?\s+дешев(?:ое|ую|ый)|дешман|дешманск(?:ое|ую|ий)|бомж\s*вариант|нищеброд\s*вариант)/gi;
+  }
+
+  function extractCheapIntent(rawQuery) {
+    return getCheapIntentPattern().test(String(rawQuery || "").toLowerCase().replace(/ё/g, "е"));
   }
 
   function getBudgetPattern() {
@@ -389,6 +406,7 @@
       parsed_terms: parsed.canonicalTerms,
       raw_terms: parsed.terms,
       budget: parsed.budget || null,
+      cheap_intent: Boolean(parsed.cheapIntent),
       mileage: parsed.mileage || null,
       drive: parsed.drive || "",
       transmission: parsed.transmission || "",
@@ -396,6 +414,7 @@
       result_titles: cars.slice(0, 10).map((car) => formatCarTitle(car))
     });
     const chips = parsed.canonicalTerms.map((term) => `<span class="chip">${escapeHtml(term)}</span>`);
+    if (parsed.cheapIntent) chips.push('<span class="chip">самые дешевые</span>');
     if (parsed.budget) chips.push(`<span class="chip">до ${formatMoney(parsed.budget)}</span>`);
     if (parsed.mileage) chips.push(`<span class="chip">пробег до ${formatMileage(parsed.mileage)}</span>`);
     if (parsed.drive) chips.push(`<span class="chip">${escapeHtml(parsed.drive)} привод</span>`);
