@@ -134,12 +134,14 @@
   }
 
   function parseQuery(rawQuery) {
-    const cheapIntent = extractCheapIntent(rawQuery);
-    const mileage = extractMileage(rawQuery);
-    const explicitBudget = extractBudget(removeMileagePhrases(rawQuery));
+    const expensiveIntent = extractExpensiveIntent(rawQuery);
+    const queryWithoutExpensiveIntent = removeExpensiveIntentPhrases(rawQuery);
+    const cheapIntent = extractCheapIntent(queryWithoutExpensiveIntent);
+    const mileage = extractMileage(queryWithoutExpensiveIntent);
+    const explicitBudget = extractBudget(removeMileagePhrases(queryWithoutExpensiveIntent));
     const budget = explicitBudget || (cheapIntent ? 200000 : null);
-    const drive = extractDrive(rawQuery);
-    const query = compactKnownPhrases(normalizeText(removeCheapIntentPhrases(removeDrivePhrases(removeBudgetPhrases(removeMileagePhrases(rawQuery))))));
+    const drive = extractDrive(queryWithoutExpensiveIntent);
+    const query = compactKnownPhrases(normalizeText(removeCheapIntentPhrases(removeDrivePhrases(removeBudgetPhrases(removeMileagePhrases(queryWithoutExpensiveIntent))))));
     const automaticWords = dictionary.transmissions?.automatic || [];
     const manualWords = dictionary.transmissions?.manual || [];
     const stopWords = dictionary.stopWords || [];
@@ -160,6 +162,7 @@
     return {
       budget,
       cheapIntent,
+      expensiveIntent,
       mileage,
       drive,
       transmission,
@@ -212,12 +215,27 @@
       .replace(/\s+/g, " ");
   }
 
+  function removeExpensiveIntentPhrases(query) {
+    return String(query || "")
+      .replace(getExpensiveIntentPattern(), " ")
+      .replace(/(?:по\s+)?(?:всей\s+)?(?:сети|базе|бд)/gi, " ")
+      .replace(/\s+/g, " ");
+  }
+
   function getCheapIntentPattern() {
     return /(?:ржав(?:ое|ую|ый|ые|ого|еньк(?:ое|ую|ий|ие))?|ржавая|ржавчина|корыто|корытце|тазик|таз|ведро|дрова|дровишки|груда\s+металла|кусок\s+металла|металлолом|чермет|утиль|хлам|автохлам|развалюха|старье|старьё|помойка|помоечка|убит(?:ое|ую|ый|ые)|уставш(?:ее|ую|ий|ие)|живой\s+труп|на\s+ходу\s+и\s+ладно|сам(?:ое|ую|ый)?\s+дешев(?:ое|ую|ый)|дешман|дешманск(?:ое|ую|ий)|бомж\s*вариант|нищеброд\s*вариант)/gi;
   }
 
   function extractCheapIntent(rawQuery) {
     return getCheapIntentPattern().test(String(rawQuery || "").toLowerCase().replace(/ё/g, "е"));
+  }
+
+  function getExpensiveIntentPattern() {
+    return /(?:дорого\s*[- ]?\s*богато|богато\s*[- ]?\s*дорого|топ\s+за\s+свои\s+деньги|топ\s+за\s+свои|лучшее\s+за\s+свои\s+деньги|лучшее\s+за\s+свои|максимум\s+за\s+свои\s+деньги|максимум\s+за\s+свои|надо\s+брать|надо\s+забирать|бери\s+не\s+думай|можно\s+брать|топчик|топ\s*8|топ\s+дорог(?:их|ие)|сам(?:ое|ую|ый|ые)?\s+дорог(?:ое|ую|ой|ие|их)|сам(?:ое|ую|ый|ые)?\s+жирн(?:ое|ую|ый|ые|ых)|сам(?:ое|ую|ый|ые)?\s+богат(?:ое|ую|ый|ые|ых)|что\s+есть\s+сам(?:ое|ые)?\s+дорог(?:ое|ие)|покажи\s+сам(?:ое|ые)?\s+дорог(?:ое|ие)|дорогие\s+тачки|дорогие\s+машины|дорогой\s+вариант|богатый\s+вариант|жирный\s+вариант|царский\s+вариант|лакомый\s+вариант|для\s+босса|для\s+директора|по\s+красоте|на\s+максималках|максималка|полный\s+фарш|жир(?:ный|ная|ное|ные)?|лакшери|люкс|премиум|премиальный|богато|все\s+деньги|все\s+лучшее|лучшее\s+что\s+есть|самый\s+сок|сладкий\s+вариант|красиво\s+жить|гулять\s+так\s+гулять)/gi;
+  }
+
+  function extractExpensiveIntent(rawQuery) {
+    return getExpensiveIntentPattern().test(String(rawQuery || "").toLowerCase().replace(/ё/g, "е"));
   }
 
   function getBudgetPattern() {
@@ -387,11 +405,15 @@
 
   function searchCars(query) {
     const parsed = parseQuery(query);
+    const limit = parsed.expensiveIntent ? 8 : (config.maxResults || 5);
     const cars = state.cars
       .map((car) => ({ car, score: scoreCar(car, parsed) }))
       .filter((item) => item.score >= 0)
-      .sort((a, b) => b.score - a.score || a.car.price - b.car.price)
-      .slice(0, config.maxResults || 5)
+      .sort((a, b) => {
+        if (parsed.expensiveIntent) return (b.car.price || 0) - (a.car.price || 0) || b.score - a.score;
+        return b.score - a.score || a.car.price - b.car.price;
+      })
+      .slice(0, limit)
       .map((item) => item.car);
 
     return { parsed, cars };
@@ -440,6 +462,7 @@
       raw_terms: parsed.terms,
       budget: parsed.budget || null,
       cheap_intent: Boolean(parsed.cheapIntent),
+      expensive_intent: Boolean(parsed.expensiveIntent),
       mileage: parsed.mileage || null,
       drive: parsed.drive || "",
       transmission: parsed.transmission || "",
@@ -448,6 +471,7 @@
     });
     const chips = parsed.canonicalTerms.map((term) => `<span class="chip">${escapeHtml(term)}</span>`);
     if (parsed.cheapIntent) chips.push('<span class="chip">самые дешевые</span>');
+    if (parsed.expensiveIntent) chips.push('<span class="chip">топ дорогих</span>');
     if (parsed.budget) chips.push(`<span class="chip">до ${formatMoney(parsed.budget)}</span>`);
     if (parsed.mileage) chips.push(`<span class="chip">пробег до ${formatMileage(parsed.mileage)}</span>`);
     if (parsed.drive) chips.push(`<span class="chip">${escapeHtml(parsed.drive)} привод</span>`);
