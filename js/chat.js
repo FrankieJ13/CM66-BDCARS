@@ -322,12 +322,7 @@
             <div class="meta">${escapeHtml(summary || "детали не указаны")}</div>
             ${renderSpecs(specs)}
           </div>
-          ${image ? `<img class="result-card-image" src="${escapeHtml(image)}" alt="${escapeHtml(title)}" loading="lazy">` : ""}
-          <a class="result-card-link" href="${escapeHtml(url)}" target="_blank" rel="noopener" aria-label="Открыть авто">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18Zm0-2c.7-.8 1.3-1.9 1.6-3h-3.2c.3 1.1.9 2.2 1.6 3Zm-2.1-5h4.2c.1-.6.2-1.3.2-2s-.1-1.4-.2-2H9.9c-.1.6-.2 1.3-.2 2s.1 1.4.2 2Zm-4.7 0h2.7c-.1-.6-.2-1.3-.2-2s.1-1.4.2-2H5.2a7 7 0 0 0 0 4Zm1.1 2a7.1 7.1 0 0 0 3 2.4A10 10 0 0 1 8.4 16H6.3Zm2.1-8c.2-.9.5-1.7.9-2.4a7.1 7.1 0 0 0-3 2.4h2.1Zm2 0h3.2A8.6 8.6 0 0 0 12 5c-.7.8-1.3 1.9-1.6 3Zm5.2 0h2.1a7.1 7.1 0 0 0-3-2.4c.4.7.7 1.5.9 2.4Zm.5 2c.1.6.2 1.3.2 2s-.1 1.4-.2 2h2.7a7 7 0 0 0 0-4h-2.7Zm-.5 6c-.2.9-.5 1.7-.9 2.4a7.1 7.1 0 0 0 3-2.4h-2.1Z"/>
-            </svg>
-          </a>
+          ${image ? `<a class="result-card-image-link" href="${escapeHtml(url)}" target="_blank" rel="noopener" aria-label="Открыть ${escapeHtml(displayTitle)}"><img class="result-card-image" src="${escapeHtml(image)}" alt="${escapeHtml(title)}" loading="lazy"></a>` : ""}
         </article>
       `;
     }).join("");
