@@ -3,7 +3,8 @@
   const dictionary = window.AUTO_ASSISTANT_DICTIONARY || {};
   const storageKeys = {
     history: "cm66-assistant-chat-history",
-    fontSize: "cm66-assistant-font-size"
+    fontSize: "cm66-assistant-font-size",
+    searchLog: "cm66-assistant-search-log"
   };
   const commands = [
     {
@@ -23,6 +24,12 @@
       command: "/актуальность бд",
       label: "Актуальность БД",
       description: "Показать дату обновления базы"
+    },
+    {
+      id: "exportLogs",
+      command: "/экспорт логов",
+      label: "Экспорт логов",
+      description: "Скачать JSON за последний час"
     }
   ];
   const state = { cars: [], awaitingFontSize: false };
@@ -292,6 +299,16 @@
 
   function renderAssistantReply(query) {
     const { parsed, cars } = searchCars(query);
+    recordSearchLog({
+      type: "search",
+      query,
+      parsed_terms: parsed.canonicalTerms,
+      raw_terms: parsed.terms,
+      budget: parsed.budget || null,
+      transmission: parsed.transmission || "",
+      results_count: cars.length,
+      result_titles: cars.slice(0, 10).map((car) => formatCarTitle(car))
+    });
     const chips = parsed.canonicalTerms.map((term) => `<span class="chip">${escapeHtml(term)}</span>`);
     if (parsed.budget) chips.push(`<span class="chip">до ${formatMoney(parsed.budget)}</span>`);
     if (parsed.transmission) chips.push(`<span class="chip">${escapeHtml(parsed.transmission)}</span>`);
@@ -303,7 +320,7 @@
 
     const cards = cars.map((car) => {
       const title = car.title || `${car.brand || ""} ${car.model || ""}`.trim() || "Автомобиль";
-      const displayTitle = car.year ? `${title} ${car.year}` : title;
+      const displayTitle = formatCarTitle(car);
       const city = normalizeCityName(car.city);
       const summary = [city, car.mileage && `${car.mileage} км`, car.transmission].filter(Boolean).join(" · ");
       const specs = [
@@ -323,12 +340,17 @@
             <div class="meta">${escapeHtml(summary || "детали не указаны")}</div>
             ${renderSpecs(specs)}
           </div>
-          ${image ? `<a class="result-card-image-link" href="${escapeHtml(url)}" target="_blank" rel="noopener" aria-label="Открыть ${escapeHtml(displayTitle)}"><img class="result-card-image" src="${escapeHtml(image)}" alt="${escapeHtml(title)}" loading="lazy"></a>` : ""}
+          ${image ? `<a class="result-card-image-link" href="${escapeHtml(url)}" target="_blank" rel="noopener" aria-label="Открыть ${escapeHtml(displayTitle)}" data-car-title="${escapeHtml(displayTitle)}" data-car-url="${escapeHtml(url)}"><img class="result-card-image" src="${escapeHtml(image)}" alt="${escapeHtml(title)}" loading="lazy"></a>` : ""}
         </article>
       `;
     }).join("");
 
     addMessage("assistant", `<p>Нашел ${cars.length} ${plural(cars.length, ["вариант", "варианта", "вариантов"])}.</p>${renderChips(chips)}<div class="result-list">${cards}</div>`);
+  }
+
+  function formatCarTitle(car) {
+    const title = car.title || `${car.brand || ""} ${car.model || ""}`.trim() || "Автомобиль";
+    return car.year ? `${title} ${car.year}` : title;
   }
 
   function renderChips(chips) {
@@ -424,7 +446,77 @@
       return true;
     }
 
+    if (command.id === "exportLogs") {
+      const count = exportSearchLogs();
+      addMessage("assistant", `<p>${count ? `Готово. Экспортировано событий: ${count}.` : "За последний час логов нет."}</p>`);
+      return true;
+    }
+
     return true;
+  }
+
+  function readSearchLog() {
+    try {
+      const items = JSON.parse(localStorage.getItem(storageKeys.searchLog) || "[]");
+      return Array.isArray(items) ? items.filter((item) => item && item.timestamp) : [];
+    } catch (error) {
+      localStorage.removeItem(storageKeys.searchLog);
+      return [];
+    }
+  }
+
+  function recordSearchLog(payload) {
+    const now = new Date();
+    const twoDaysAgo = now.getTime() - 48 * 60 * 60 * 1000;
+    const items = readSearchLog()
+      .filter((item) => Date.parse(item.timestamp) >= twoDaysAgo)
+      .slice(-499);
+    items.push({
+      timestamp: now.toISOString(),
+      source: "assistant-chat",
+      catalog_size: state.cars.length,
+      ...payload
+    });
+    localStorage.setItem(storageKeys.searchLog, JSON.stringify(items));
+  }
+
+  function getSearchLogsForLastHour() {
+    const since = Date.now() - 60 * 60 * 1000;
+    return readSearchLog().filter((item) => Date.parse(item.timestamp) >= since);
+  }
+
+  function exportSearchLogs() {
+    const items = getSearchLogsForLastHour();
+    if (!items.length) return 0;
+
+    const exportedAt = new Date();
+    const payload = {
+      exported_at: exportedAt.toISOString(),
+      period: "last_hour",
+      app: "CM66-BDCARS",
+      catalog: getDatabaseFreshness({ compact: true }),
+      items
+    };
+    const filename = `cm66-search-log-${formatFileDate(exportedAt)}.json`;
+    downloadJson(filename, payload);
+    return items.length;
+  }
+
+  function downloadJson(filename, payload) {
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function formatFileDate(date) {
+    const pad = (value) => String(value).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}_${pad(date.getHours())}-${pad(date.getMinutes())}`;
   }
 
   function getDatabaseFreshness(options = {}) {
@@ -611,9 +703,19 @@
 
   els.window.addEventListener("click", (event) => {
     const button = event.target.closest("[data-command]");
-    if (!button) return;
-    els.input.value = button.dataset.command;
-    els.form.requestSubmit();
+    if (button) {
+      els.input.value = button.dataset.command;
+      els.form.requestSubmit();
+      return;
+    }
+
+    const carLink = event.target.closest(".result-card-image-link[data-car-url]");
+    if (!carLink) return;
+    recordSearchLog({
+      type: "click",
+      clicked_title: carLink.dataset.carTitle || "",
+      clicked_url: carLink.dataset.carUrl || carLink.href
+    });
   });
 
   loadSettings();
