@@ -293,11 +293,12 @@
     if (options.transient) message.dataset.transient = "true";
     message.innerHTML = html;
     els.window.appendChild(message);
-    els.window.scrollTop = els.window.scrollHeight;
+    if (options.scroll !== false) els.window.scrollTop = els.window.scrollHeight;
     if (options.save !== false) saveHistory();
+    return message;
   }
 
-  function renderAssistantReply(query) {
+  function renderAssistantReply(query, anchorMessage = null) {
     const { parsed, cars } = searchCars(query);
     recordSearchLog({
       type: "search",
@@ -314,11 +315,12 @@
     if (parsed.transmission) chips.push(`<span class="chip">${escapeHtml(parsed.transmission)}</span>`);
 
     if (!cars.length) {
-      addMessage("assistant", `<p>Пока не нашел подходящих авто. Можно убрать город, коробку или повысить бюджет.</p>${renderChips(chips)}`);
+      addMessage("assistant", `<p>Пока не нашел подходящих авто. Можно убрать город, коробку или повысить бюджет.</p>${renderChips(chips)}`, { scroll: false });
+      scrollConversationStart(anchorMessage);
       return;
     }
 
-    const cards = cars.map((car) => {
+    const cards = cars.map((car, index) => {
       const title = car.title || `${car.brand || ""} ${car.model || ""}`.trim() || "Автомобиль";
       const displayTitle = formatCarTitle(car);
       const city = normalizeCityName(car.city);
@@ -333,7 +335,7 @@
       const image = getCarImage(car);
       const url = getCarUrl(car);
       return `
-        <article class="result-card ${image ? "has-image" : ""}">
+        <article class="result-card ${image ? "has-image" : ""}" style="--card-index: ${index};">
           <div class="result-card-content">
             <h2>${escapeHtml(displayTitle)}</h2>
             <div class="price">${escapeHtml(formatMoney(car.price))}</div>
@@ -345,7 +347,20 @@
       `;
     }).join("");
 
-    addMessage("assistant", `<p>Нашел ${cars.length} ${plural(cars.length, ["вариант", "варианта", "вариантов"])}.</p>${renderChips(chips)}<div class="result-list">${cards}</div>`);
+    addMessage("assistant", `<p>Нашел ${cars.length} ${plural(cars.length, ["вариант", "варианта", "вариантов"])}.</p>${renderChips(chips)}<div class="result-list">${cards}</div>`, { scroll: false });
+    scrollConversationStart(anchorMessage);
+  }
+
+  function scrollConversationStart(anchorMessage) {
+    if (!anchorMessage) {
+      els.window.scrollTop = els.window.scrollHeight;
+      return;
+    }
+    requestAnimationFrame(() => {
+      const top = anchorMessage.offsetTop - els.window.offsetTop - 8;
+      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      els.window.scrollTo({ top: Math.max(0, top), behavior: reducedMotion ? "auto" : "smooth" });
+    });
   }
 
   function formatCarTitle(car) {
@@ -658,8 +673,8 @@
     if (!query) return;
     els.window.innerHTML = "";
     els.input.value = query;
-    addMessage("user", `<p>${escapeHtml(query)}</p>`);
-    renderAssistantReply(query);
+    const userMessage = addMessage("user", `<p>${escapeHtml(query)}</p>`, { scroll: false });
+    renderAssistantReply(query, userMessage);
     els.input.value = "";
   }
 
@@ -682,8 +697,8 @@
       return;
     }
 
-    addMessage("user", `<p>${escapeHtml(query)}</p>`);
-    renderAssistantReply(query);
+    const userMessage = addMessage("user", `<p>${escapeHtml(query)}</p>`, { scroll: false });
+    renderAssistantReply(query, userMessage);
     els.input.value = "";
     els.input.focus();
   });
