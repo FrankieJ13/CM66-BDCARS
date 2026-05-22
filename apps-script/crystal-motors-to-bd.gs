@@ -8,7 +8,7 @@ const MAX_CATALOG_PAGES = 160;
 const CATALOG_PAGE_SIZE = 24;
 const PAGES_PER_RUN = 18;
 const DAY_INCREMENTAL_PAGES = 12;
-const DETAILS_PER_RUN = 40;
+const DETAILS_PER_RUN = 25;
 const REQUEST_PAUSE_MS = 450;
 const NEXT_BATCH_DELAY_MS = 60 * 1000;
 const FETCH_RETRIES = 3;
@@ -19,6 +19,7 @@ const NIGHTLY_FULL_REFRESH_HOUR = 21;
 const NIGHTLY_COUNT_CHECK_HOUR = 23;
 const NIGHTLY_COUNT_CHECK_MINUTE = 50;
 const SITE_COUNT_TOLERANCE = 40;
+const FULL_REFRESH_COOLDOWN_MS = 20 * 60 * 60 * 1000;
 const ASSISTANT_URL = 'https://frankiej13.github.io/CM66-BDCARS/';
 
 function onOpen() {
@@ -115,7 +116,17 @@ function setupAndRefreshCrystalMotorsSync() {
 }
 
 function startFullCatalogRefresh() {
+  startFullCatalogRefresh_(true);
+}
+
+function startFullCatalogRefresh_(force) {
   const properties = PropertiesService.getScriptProperties();
+  if (!force && properties.getProperty('details_next_row')) {
+    logSync_('refresh_start', 'SKIP', `Details enrichment is active at row ${properties.getProperty('details_next_row')}`);
+    scheduleNextDetailsBatch_();
+    return;
+  }
+
   properties.setProperty('next_page', '1');
   properties.setProperty('sync_mode', 'full');
   properties.deleteProperty('details_next_row');
@@ -123,6 +134,12 @@ function startFullCatalogRefresh() {
   clearBufferedCars_();
   logSync_('refresh_start', 'OK', 'Full refresh started from page 1, buffer cleared');
   refreshCrystalMotorsCatalog();
+}
+
+function forceStartFullCatalogRefresh_() {
+  const properties = PropertiesService.getScriptProperties();
+  properties.deleteProperty('details_next_row');
+  startFullCatalogRefresh_(true);
 }
 
 function continueCatalogRefresh() {
@@ -267,7 +284,14 @@ function scheduledDaytimeIncrementalCatalogSync() {
 }
 
 function scheduledNightlyFullCatalogRefresh() {
-  startFullCatalogRefresh();
+  const properties = PropertiesService.getScriptProperties();
+  const lastRefreshAt = Number(properties.getProperty('last_refresh_at') || 0);
+  if (lastRefreshAt && Date.now() - lastRefreshAt < FULL_REFRESH_COOLDOWN_MS) {
+    logSync_('refresh_start', 'SKIP', 'Recent full refresh already finished, cooldown active');
+    return;
+  }
+
+  startFullCatalogRefresh_(false);
 }
 
 function scheduledNightlyCatalogCountCheck() {
@@ -439,18 +463,31 @@ function enrichCarDetailsBatch() {
       return;
     }
 
-    const responses = UrlFetchApp.fetchAll(requests);
     const updates = [];
-    responses.forEach((response, responseIndex) => {
-      const code = response.getResponseCode();
-      if (code < 200 || code >= 300) return;
-      const details = parseCarDetailPage_(response.getContentText('UTF-8'));
-      const row = updatedValues[rowNumbers[responseIndex] - 1].slice();
-      Object.keys(details).forEach((key) => {
-        if (index[key] >= 0 && details[key]) row[index[key]] = details[key];
-      });
-      if (index.updated_at >= 0) row[index.updated_at] = new Date().toISOString();
-      updates.push({ rowNumber: rowNumbers[responseIndex], row });
+    let failed = 0;
+
+    requests.forEach((request, requestIndex) => {
+      try {
+        const requestOptions = Object.assign({}, request);
+        delete requestOptions.url;
+        const response = fetchWithRetry_(request.url, requestOptions);
+        const code = response.getResponseCode();
+        if (code < 200 || code >= 300) {
+          failed += 1;
+          return;
+        }
+
+        const details = parseCarDetailPage_(response.getContentText('UTF-8'));
+        const row = updatedValues[rowNumbers[requestIndex] - 1].slice();
+        Object.keys(details).forEach((key) => {
+          if (index[key] >= 0 && details[key]) row[index[key]] = details[key];
+        });
+        if (index.updated_at >= 0) row[index.updated_at] = new Date().toISOString();
+        updates.push({ rowNumber: rowNumbers[requestIndex], row });
+      } catch (error) {
+        failed += 1;
+        logSync_('details_row', 'SKIP', `Row ${rowNumbers[requestIndex]} skipped: ${error.message}`);
+      }
     });
 
     updates.forEach((update) => {
@@ -466,9 +503,14 @@ function enrichCarDetailsBatch() {
 
     properties.setProperty('details_next_row', String(rowNumber));
     scheduleNextDetailsBatch_();
-    logSync_('details_batch', 'CONTINUE', `${updates.length} cars enriched, next row ${rowNumber}`);
+    logSync_('details_batch', 'CONTINUE', `${updates.length} cars enriched, ${failed} failed, next row ${rowNumber}`);
   } catch (error) {
     logSync_('details', 'ERROR', error.stack || error.message);
+    if (PropertiesService.getScriptProperties().getProperty('details_next_row')) {
+      scheduleNextDetailsBatch_();
+      logSync_('details_batch', 'RETRY', `Details batch failed, retry scheduled from row ${PropertiesService.getScriptProperties().getProperty('details_next_row')}`);
+      return;
+    }
     throw error;
   }
 }
