@@ -32,7 +32,7 @@
       description: "Скачать JSON за последний час"
     }
   ];
-  const state = { cars: [], awaitingFontSize: false };
+  const state = { cars: [], awaitingFontSize: false, replyTimers: [], replySequence: 0 };
 
   const els = {
     form: document.getElementById("chatForm"),
@@ -299,6 +299,7 @@
   }
 
   function renderAssistantReply(query, anchorMessage = null) {
+    cancelPendingReplyAnimation();
     const { parsed, cars } = searchCars(query);
     recordSearchLog({
       type: "search",
@@ -320,35 +321,62 @@
       return;
     }
 
-    const cards = cars.map((car, index) => {
-      const title = car.title || `${car.brand || ""} ${car.model || ""}`.trim() || "Автомобиль";
-      const displayTitle = formatCarTitle(car);
-      const city = normalizeCityName(car.city);
-      const summary = [city, car.mileage && `${car.mileage} км`, car.transmission].filter(Boolean).join(" · ");
-      const specs = [
-        ["Кузов", car.body],
-        ["Мощн.", car.power],
-        ["Двиг.", car.engine],
-        ["Привод", car.drive],
-        ["Руль", car.wheel]
-      ].filter((item) => item[1]);
-      const image = getCarImage(car);
-      const url = getCarUrl(car);
-      return `
-        <article class="result-card ${image ? "has-image" : ""}" style="--card-index: ${index};">
-          <div class="result-card-content">
-            <h2>${escapeHtml(displayTitle)}</h2>
-            <div class="price">${escapeHtml(formatMoney(car.price))}</div>
-            <div class="meta">${escapeHtml(summary || "детали не указаны")}</div>
-            ${renderSpecs(specs)}
-          </div>
-          ${image ? `<a class="result-card-image-link" href="${escapeHtml(url)}" target="_blank" rel="noopener" aria-label="Открыть ${escapeHtml(displayTitle)}" data-car-title="${escapeHtml(displayTitle)}" data-car-url="${escapeHtml(url)}"><img class="result-card-image" src="${escapeHtml(image)}" alt="${escapeHtml(title)}" loading="lazy"></a>` : ""}
-        </article>
-      `;
-    }).join("");
-
-    addMessage("assistant", `<p>Нашел ${cars.length} ${plural(cars.length, ["вариант", "варианта", "вариантов"])}.</p>${renderChips(chips)}<div class="result-list">${cards}</div>`, { scroll: false });
+    const message = addMessage("assistant", `<p>Нашел ${cars.length} ${plural(cars.length, ["вариант", "варианта", "вариантов"])}.</p>${renderChips(chips)}<div class="result-list is-streaming"></div>`, { scroll: false });
+    streamResultCards(message, cars);
     scrollConversationStart(anchorMessage);
+  }
+
+  function cancelPendingReplyAnimation() {
+    state.replySequence += 1;
+    state.replyTimers.forEach((timer) => clearTimeout(timer));
+    state.replyTimers = [];
+  }
+
+  function streamResultCards(message, cars) {
+    const list = message.querySelector(".result-list");
+    if (!list) return;
+
+    const sequence = state.replySequence;
+    const interval = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 260;
+    cars.forEach((car, index) => {
+      const timer = setTimeout(() => {
+        if (sequence !== state.replySequence) return;
+        list.insertAdjacentHTML("beforeend", renderResultCard(car));
+        if (index === cars.length - 1) {
+          list.classList.remove("is-streaming");
+          state.replyTimers = [];
+          saveHistory();
+        }
+      }, interval * index);
+      state.replyTimers.push(timer);
+    });
+  }
+
+  function renderResultCard(car) {
+    const title = car.title || `${car.brand || ""} ${car.model || ""}`.trim() || "Автомобиль";
+    const displayTitle = formatCarTitle(car);
+    const city = normalizeCityName(car.city);
+    const summary = [city, car.mileage && `${car.mileage} км`, car.transmission].filter(Boolean).join(" · ");
+    const specs = [
+      ["Кузов", car.body],
+      ["Мощн.", car.power],
+      ["Двиг.", car.engine],
+      ["Привод", car.drive],
+      ["Руль", car.wheel]
+    ].filter((item) => item[1]);
+    const image = getCarImage(car);
+    const url = getCarUrl(car);
+    return `
+      <article class="result-card ${image ? "has-image" : ""}">
+        <div class="result-card-content">
+          <h2>${escapeHtml(displayTitle)}</h2>
+          <div class="price">${escapeHtml(formatMoney(car.price))}</div>
+          <div class="meta">${escapeHtml(summary || "детали не указаны")}</div>
+          ${renderSpecs(specs)}
+        </div>
+        ${image ? `<a class="result-card-image-link" href="${escapeHtml(url)}" target="_blank" rel="noopener" aria-label="Открыть ${escapeHtml(displayTitle)}" data-car-title="${escapeHtml(displayTitle)}" data-car-url="${escapeHtml(url)}"><img class="result-card-image" src="${escapeHtml(image)}" alt="${escapeHtml(title)}" loading="lazy"></a>` : ""}
+      </article>
+    `;
   }
 
   function scrollConversationStart(anchorMessage) {
