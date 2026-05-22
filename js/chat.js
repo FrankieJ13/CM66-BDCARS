@@ -129,9 +129,15 @@
     return value ? `${Number(value).toLocaleString("ru-RU")} ₽` : "цена по запросу";
   }
 
+  function formatMileage(value) {
+    return value ? `${Number(value).toLocaleString("ru-RU")} км` : "";
+  }
+
   function parseQuery(rawQuery) {
-    const budget = extractBudget(rawQuery);
-    const query = compactKnownPhrases(normalizeText(removeBudgetPhrases(rawQuery)));
+    const mileage = extractMileage(rawQuery);
+    const budget = extractBudget(removeMileagePhrases(rawQuery));
+    const drive = extractDrive(rawQuery);
+    const query = compactKnownPhrases(normalizeText(removeDrivePhrases(removeBudgetPhrases(removeMileagePhrases(rawQuery)))));
     const automaticWords = dictionary.transmissions?.automatic || [];
     const manualWords = dictionary.transmissions?.manual || [];
     const stopWords = dictionary.stopWords || [];
@@ -146,11 +152,13 @@
         : "";
 
     const searchable = terms.filter((term) => {
-      return !automaticWords.includes(term) && !manualWords.includes(term) && !stopWords.includes(term);
+      return !automaticWords.includes(term) && !manualWords.includes(term) && !stopWords.includes(term) && !isDriveTerm(term);
     });
 
     return {
       budget,
+      mileage,
+      drive,
       transmission,
       terms: searchable,
       canonicalTerms: searchable.map(canonicalToken),
@@ -182,6 +190,18 @@
       .replace(/\s+/g, " ");
   }
 
+  function removeMileagePhrases(query) {
+    return String(query || "")
+      .replace(getMileagePattern(), " ")
+      .replace(/\s+/g, " ");
+  }
+
+  function removeDrivePhrases(query) {
+    return String(query || "")
+      .replace(getDrivePattern(), " ")
+      .replace(/\s+/g, " ");
+  }
+
   function getBudgetPattern() {
     return /(?:до|<=|<|меньше|дешевле|не\s+дороже|бюджет(?:ом)?|цена\s+до|стоимость\s+до)?\s*\d+(?:[\s.,]\d+)*\s*(?:млн|мил(?:лион(?:а|ов)?)?|m|м|тыс(?:яч)?|тр|к|k)(?=$|\s|[.,!?])|(?:до|<=|<|меньше|дешевле|не\s+дороже|бюджет(?:ом)?|цена\s+до|стоимость\s+до)\s*\d+(?:[\s.,]\d+)*|\b[1-9]\d{5,7}\b/gi;
   }
@@ -193,6 +213,52 @@
       .map((match) => parseBudgetValue(match[0]))
       .filter((value) => value >= 50000 && value <= 50000000);
     return budgets.length ? Math.max(...budgets) : null;
+  }
+
+  function getMileagePattern() {
+    const mileageNumber = String.raw`\d+(?:[.,]\d+)?(?:\s?\d{3})*`;
+    return new RegExp(String.raw`(?:пробег(?:ом)?|километраж(?:ем)?|км|km)\s*(?:до|<=|<|меньше|не\s+более|не\s+выше)?\s*${mileageNumber}\s*(?:тыс(?:яч)?|т|к|k|км|km)?|(?:до|<=|<|меньше|не\s+более|не\s+выше)\s*${mileageNumber}\s*(?:тыс(?:яч)?|т|к|k)?\s*(?:км|km|пробег(?:а|ом)?|километраж(?:а|ем)?)`, "gi");
+  }
+
+  function extractMileage(rawQuery) {
+    const text = String(rawQuery || "").toLowerCase().replace(/ё/g, "е");
+    const matches = Array.from(text.matchAll(getMileagePattern()));
+    const mileages = matches
+      .map((match) => parseMileageValue(match[0]))
+      .filter((value) => value >= 1000 && value <= 1000000);
+    return mileages.length ? Math.max(...mileages) : null;
+  }
+
+  function parseMileageValue(fragment) {
+    const text = String(fragment || "").toLowerCase().replace(/ё/g, "е");
+    const numberMatch = text.match(/\d+(?:[\s.,]\d+)*/);
+    if (!numberMatch) return 0;
+
+    const normalizedNumber = numberMatch[0].replace(/\s+/g, "");
+    const hasDecimal = /[.,]/.test(normalizedNumber);
+    const value = Number(normalizedNumber.replace(",", "."));
+    if (!Number.isFinite(value)) return 0;
+
+    if (/(тыс|км|km|т|\bк\b|\bk\b)/i.test(text) && value < 10000) return Math.round(value * 1000);
+    if (hasDecimal && value < 1000) return Math.round(value * 1000);
+    if (value < 1000) return Math.round(value * 1000);
+    return Math.round(value);
+  }
+
+  function getDrivePattern() {
+    return /(?:передний|переднем|передн(?:ий|ем)?\s+привод|fwd|задний|заднем|задн(?:ий|ем)?\s+привод|rwd|полный|полном|полн(?:ый|ом)?\s+привод|полнопривод(?:ный|ная|ное)?|4\s?wd|awd|4\s?вд|4\s?x\s?4)/gi;
+  }
+
+  function extractDrive(rawQuery) {
+    const text = normalizeText(rawQuery);
+    if (/(передний|переднем|передн\s+привод|fwd)/.test(text)) return "передний";
+    if (/(задний|заднем|задн\s+привод|rwd)/.test(text)) return "задний";
+    if (/(полный|полном|полн\s+привод|полнопривод|4wd|awd|4вд|4 x 4|4x4)/.test(text)) return "полный";
+    return "";
+  }
+
+  function isDriveTerm(term) {
+    return /^(передний|переднем|передн|задний|заднем|задн|полный|полном|полн|полнопривод|привод|4wd|awd|4вд|4x4|fwd|rwd)$/.test(normalizeText(term));
   }
 
   function parseBudgetValue(fragment) {
@@ -235,7 +301,9 @@
     const text = carSearchText(car);
     let score = 0;
     if (parsed.budget && car.price > parsed.budget) return -1;
+    if (parsed.mileage && parseMileageField(car.mileage) > parsed.mileage) return -1;
     if (parsed.transmission && !transmissionMatches(car.transmission, parsed.transmission)) return -1;
+    if (parsed.drive && !driveMatches(car.drive, parsed.drive)) return -1;
 
     for (const variants of parsed.expandedTerms) {
       if (!variants.some((term) => text.includes(term))) return -1;
@@ -243,7 +311,13 @@
     }
 
     if (parsed.budget && car.price) score += Math.max(0, 3 - Math.floor((parsed.budget - car.price) / 200000));
+    if (parsed.mileage && car.mileage) score += Math.max(0, 3 - Math.floor((parsed.mileage - parseMileageField(car.mileage)) / 30000));
     return score;
+  }
+
+  function parseMileageField(value) {
+    const text = String(value || "").replace(/[^\d]/g, "");
+    return text ? Number(text) : 0;
   }
 
   function transmissionMatches(value, requested) {
@@ -251,6 +325,14 @@
     if (!requested) return true;
     if (requested === "механика") return /механ|manual|mkpp|мкпп|руч/.test(text);
     return /автомат|automatic|auto|akpp|акпп|вариатор|cvt|робот|dsg|дсг/.test(text);
+  }
+
+  function driveMatches(value, requested) {
+    const text = normalizeText(value);
+    if (!requested) return true;
+    if (requested === "передний") return /перед|front|fwd/.test(text);
+    if (requested === "задний") return /зад|rear|rwd/.test(text);
+    return /полн|4wd|awd|4вд|4 x 4|4x4/.test(text);
   }
 
   function searchCars(query) {
@@ -307,12 +389,16 @@
       parsed_terms: parsed.canonicalTerms,
       raw_terms: parsed.terms,
       budget: parsed.budget || null,
+      mileage: parsed.mileage || null,
+      drive: parsed.drive || "",
       transmission: parsed.transmission || "",
       results_count: cars.length,
       result_titles: cars.slice(0, 10).map((car) => formatCarTitle(car))
     });
     const chips = parsed.canonicalTerms.map((term) => `<span class="chip">${escapeHtml(term)}</span>`);
     if (parsed.budget) chips.push(`<span class="chip">до ${formatMoney(parsed.budget)}</span>`);
+    if (parsed.mileage) chips.push(`<span class="chip">пробег до ${formatMileage(parsed.mileage)}</span>`);
+    if (parsed.drive) chips.push(`<span class="chip">${escapeHtml(parsed.drive)} привод</span>`);
     if (parsed.transmission) chips.push(`<span class="chip">${escapeHtml(parsed.transmission)}</span>`);
 
     if (!cars.length) {
