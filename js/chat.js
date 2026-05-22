@@ -444,7 +444,7 @@
       drive: parsed.drive || "",
       transmission: parsed.transmission || "",
       results_count: cars.length,
-      result_titles: cars.slice(0, 10).map((car) => formatCarTitle(car))
+      results: cars.slice(0, 10).map(formatCarLogItem)
     });
     const chips = parsed.canonicalTerms.map((term) => `<span class="chip">${escapeHtml(term)}</span>`);
     if (parsed.cheapIntent) chips.push('<span class="chip">самые дешевые</span>');
@@ -532,6 +532,25 @@
   function formatCarTitle(car) {
     const title = car.title || `${car.brand || ""} ${car.model || ""}`.trim() || "Автомобиль";
     return car.year ? `${title} ${car.year}` : title;
+  }
+
+  function formatCarLogItem(car) {
+    return {
+      title: formatCarTitle(car),
+      brand: car.brand || "",
+      model: car.model || "",
+      year: car.year || "",
+      price: car.price || null,
+      city: normalizeCityName(car.city),
+      mileage: parseMileageField(car.mileage) || null,
+      transmission: car.transmission || "",
+      body: car.body || "",
+      engine: car.engine || "",
+      drive: car.drive || "",
+      power: car.power || "",
+      wheel: car.wheel || "",
+      url: getCarUrl(car)
+    };
   }
 
   function renderChips(chips) {
