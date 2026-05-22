@@ -302,7 +302,9 @@
 
     const cards = cars.map((car) => {
       const title = car.title || `${car.brand || ""} ${car.model || ""}`.trim() || "Автомобиль";
-      const summary = [car.year, car.city, car.mileage && `${car.mileage} км`, car.transmission].filter(Boolean).join(" · ");
+      const displayTitle = car.year ? `${title} ${car.year}` : title;
+      const city = normalizeCityName(car.city);
+      const summary = [city, car.mileage && `${car.mileage} км`, car.transmission].filter(Boolean).join(" · ");
       const specs = [
         ["Кузов", car.body],
         ["Мощн.", car.power],
@@ -315,7 +317,7 @@
       return `
         <article class="result-card ${image ? "has-image" : ""}">
           <div class="result-card-content">
-            <h2>${escapeHtml(title)}</h2>
+            <h2>${escapeHtml(displayTitle)}</h2>
             <div class="price">${escapeHtml(formatMoney(car.price))}</div>
             <div class="meta">${escapeHtml(summary || "детали не указаны")}</div>
             ${renderSpecs(specs)}
@@ -345,6 +347,26 @@
   function getCarImage(car) {
     const url = String(car.image_url || car.image || car.photo || "").trim();
     return /^https?:\/\//i.test(url) ? url : "";
+  }
+
+  function normalizeCityName(value) {
+    const text = String(value || "").trim();
+    const cities = {
+      "барнауле": "Барнаул",
+      "екатеринбурге": "Екатеринбург",
+      "кемерово": "Кемерово",
+      "красноярске": "Красноярск",
+      "новокузнецке": "Новокузнецк",
+      "новосибирске": "Новосибирск",
+      "омске": "Омск",
+      "оренбурге": "Оренбург",
+      "перми": "Пермь",
+      "сургуте": "Сургут",
+      "томске": "Томск",
+      "тюмени": "Тюмень",
+      "челябинске": "Челябинск"
+    };
+    return cities[normalizeText(text)] || text;
   }
 
   function renderCommandList() {
