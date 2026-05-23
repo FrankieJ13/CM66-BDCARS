@@ -33,6 +33,26 @@
     }
   ];
   const resultPageSize = Math.max(12, Number(config.maxResults) || 12);
+  const bodyTypeEntries = [
+    ["хетчбэк", ["хетчбэк", "хетчбек", "хетч", "хеч", "хэч", "хэтч", "хэтчбек", "hatchback", "hatch"]],
+    ["седан", ["седан", "сидан", "sedan"]],
+    ["кроссовер", ["кроссовер", "кросовер", "паркетник", "suv", "crossover"]],
+    ["внедорожник", ["внедорожник", "джип", "вездеход", "suv", "offroad"]],
+    ["минивэн", ["минивэн", "минивен", "мини van", "minivan"]],
+    ["универсал", ["универсал", "вагон", "wagon", "estate"]],
+    ["лифтбек", ["лифтбек", "лифтбэк", "liftback"]],
+    ["пикап", ["пикап", "pickup", "pick up"]],
+    ["купе", ["купе", "coupe"]],
+    ["фургон", ["фургон", "van"]],
+    ["кабриолет", ["кабриолет", "cabriolet", "convertible"]],
+    ["родстер", ["родстер", "roadster"]],
+    ["фастбек", ["фастбек", "fastback"]],
+    ["ландо", ["ландо", "landau"]],
+    ["лимузин", ["лимузин", "limousine", "limo"]],
+    ["хардтоп", ["хардтоп", "hardtop"]],
+    ["микроавтобус", ["микроавтобус", "микрик", "микро автобус", "minibus"]],
+    ["тарга", ["тарга", "targa"]]
+  ].map(([name, aliases]) => ({ name, variants: Array.from(new Set([name, ...aliases].map(normalizeText).filter(Boolean))) }));
   const state = { cars: [], awaitingFontSize: false, replyTimers: [], replySequence: 0 };
 
   const els = {
@@ -142,7 +162,8 @@
     const explicitBudget = extractBudget(removeMileagePhrases(queryWithoutExpensiveIntent));
     const budget = explicitBudget || (cheapIntent ? 200000 : null);
     const drive = extractDrive(queryWithoutExpensiveIntent);
-    const query = compactKnownPhrases(normalizeText(removeCheapIntentPhrases(removeDrivePhrases(removeBudgetPhrases(removeMileagePhrases(queryWithoutExpensiveIntent))))));
+    const bodyTypes = extractBodyTypes(queryWithoutExpensiveIntent);
+    const query = compactKnownPhrases(removeBodyTypePhrases(normalizeText(removeCheapIntentPhrases(removeDrivePhrases(removeBudgetPhrases(removeMileagePhrases(queryWithoutExpensiveIntent)))))));
     const automaticWords = dictionary.transmissions?.automatic || [];
     const manualWords = dictionary.transmissions?.manual || [];
     const stopWords = dictionary.stopWords || [];
@@ -166,6 +187,7 @@
       expensiveIntent,
       mileage,
       drive,
+      bodyTypes,
       transmission,
       terms: searchable,
       canonicalTerms: searchable.map(canonicalToken),
@@ -208,6 +230,17 @@
     return String(query || "")
       .replace(getDrivePattern(), " ")
       .replace(/\s+/g, " ");
+  }
+
+  function removeBodyTypePhrases(query) {
+    let output = ` ${normalizeText(query)} `;
+    const variants = bodyTypeEntries
+      .flatMap((entry) => entry.variants)
+      .sort((a, b) => b.length - a.length);
+    variants.forEach((variant) => {
+      output = output.replace(new RegExp(`(^| )${escapeRegExp(variant)}(?= |$)`, "g"), " ");
+    });
+    return output.replace(/\s+/g, " ").trim();
   }
 
   function removeCheapIntentPhrases(query) {
@@ -294,6 +327,13 @@
     return "";
   }
 
+  function extractBodyTypes(rawQuery) {
+    const text = ` ${normalizeText(rawQuery)} `;
+    return bodyTypeEntries
+      .filter((entry) => entry.variants.some((variant) => new RegExp(`(^| )${escapeRegExp(variant)}(?= |$)`).test(text)))
+      .map((entry) => entry.name);
+  }
+
   function isDriveTerm(term) {
     return /^(передний|переднем|передн|задний|заднем|задн|полный|полном|полн|полнопривод|привод|4wd|awd|4вд|4x4|fwd|rwd)$/.test(normalizeText(term));
   }
@@ -351,6 +391,7 @@
     if (parsed.mileage && parseMileageField(car.mileage) > parsed.mileage) return -1;
     if (parsed.transmission && !transmissionMatches(car.transmission, parsed.transmission)) return -1;
     if (parsed.drive && !driveMatches(car.drive, parsed.drive)) return -1;
+    if (parsed.bodyTypes?.length && !bodyTypeMatches(car.body, parsed.bodyTypes)) return -1;
 
     for (const match of parsed.termMatches) {
       if (!termMatchesCar(car, text, match)) return -1;
@@ -359,6 +400,7 @@
 
     if (parsed.budget && car.price) score += Math.max(0, 3 - Math.floor((parsed.budget - car.price) / 200000));
     if (parsed.mileage && car.mileage) score += Math.max(0, 3 - Math.floor((parsed.mileage - parseMileageField(car.mileage)) / 30000));
+    if (parsed.bodyTypes?.length) score += 2;
     return score;
   }
 
@@ -402,6 +444,14 @@
     if (requested === "передний") return /перед|front|fwd/.test(text);
     if (requested === "задний") return /зад|rear|rwd/.test(text);
     return /полн|4wd|awd|4вд|4 x 4|4x4/.test(text);
+  }
+
+  function bodyTypeMatches(value, requested) {
+    const text = ` ${normalizeText(value)} `;
+    return requested.some((name) => {
+      const entry = bodyTypeEntries.find((item) => item.name === name);
+      return entry?.variants.some((variant) => text.includes(` ${variant} `) || text.includes(` ${variant.replace(/\s+/g, "")} `));
+    });
   }
 
   function searchCars(query) {
@@ -465,6 +515,7 @@
       expensive_intent: Boolean(parsed.expensiveIntent),
       mileage: parsed.mileage || null,
       drive: parsed.drive || "",
+      body_types: parsed.bodyTypes || [],
       transmission: parsed.transmission || "",
       results_count: cars.length,
       shown_count: visibleCars.length,
@@ -476,6 +527,7 @@
     if (parsed.budget) chips.push(`<span class="chip">до ${formatMoney(parsed.budget)}</span>`);
     if (parsed.mileage) chips.push(`<span class="chip">пробег до ${formatMileage(parsed.mileage)}</span>`);
     if (parsed.drive) chips.push(`<span class="chip">${escapeHtml(parsed.drive)} привод</span>`);
+    (parsed.bodyTypes || []).forEach((type) => chips.push(`<span class="chip">${escapeHtml(type)}</span>`));
     if (parsed.transmission) chips.push(`<span class="chip">${escapeHtml(parsed.transmission)}</span>`);
 
     if (!cars.length) {
