@@ -154,16 +154,26 @@
     return value ? `${Number(value).toLocaleString("ru-RU")} км` : "";
   }
 
+  function formatPowerChip(power) {
+    if (!power) return "";
+    if (power.mode === "max") return `до ${power.value} л.с.`;
+    if (power.mode === "min") return `от ${power.value} л.с.`;
+    return `около ${power.value} л.с.`;
+  }
+
   function parseQuery(rawQuery) {
     const expensiveIntent = extractExpensiveIntent(rawQuery);
     const queryWithoutExpensiveIntent = removeExpensiveIntentPhrases(rawQuery);
     const cheapIntent = extractCheapIntent(queryWithoutExpensiveIntent);
     const mileage = extractMileage(queryWithoutExpensiveIntent);
-    const explicitBudget = extractBudget(removeMileagePhrases(queryWithoutExpensiveIntent));
+    const power = extractPower(queryWithoutExpensiveIntent);
+    const explicitBudget = extractBudget(removePowerPhrases(removeMileagePhrases(queryWithoutExpensiveIntent)));
     const budget = explicitBudget || (cheapIntent ? 200000 : null);
     const drive = extractDrive(queryWithoutExpensiveIntent);
+    const wheel = extractWheel(queryWithoutExpensiveIntent);
+    const fuel = extractFuel(queryWithoutExpensiveIntent);
     const bodyTypes = extractBodyTypes(queryWithoutExpensiveIntent);
-    const query = compactKnownPhrases(removeBodyTypePhrases(normalizeText(removeCheapIntentPhrases(removeDrivePhrases(removeBudgetPhrases(removeMileagePhrases(queryWithoutExpensiveIntent)))))));
+    const query = compactKnownPhrases(removeBodyTypePhrases(normalizeText(removeFuelPhrases(removeWheelPhrases(removeCheapIntentPhrases(removeDrivePhrases(removeBudgetPhrases(removePowerPhrases(removeMileagePhrases(queryWithoutExpensiveIntent))))))))));
     const automaticWords = dictionary.transmissions?.automatic || [];
     const manualWords = dictionary.transmissions?.manual || [];
     const stopWords = dictionary.stopWords || [];
@@ -186,7 +196,10 @@
       cheapIntent,
       expensiveIntent,
       mileage,
+      power,
       drive,
+      wheel,
+      fuel,
       bodyTypes,
       transmission,
       terms: searchable,
@@ -226,9 +239,27 @@
       .replace(/\s+/g, " ");
   }
 
+  function removePowerPhrases(query) {
+    return String(query || "")
+      .replace(getPowerPattern(), " ")
+      .replace(/\s+/g, " ");
+  }
+
   function removeDrivePhrases(query) {
     return String(query || "")
       .replace(getDrivePattern(), " ")
+      .replace(/\s+/g, " ");
+  }
+
+  function removeWheelPhrases(query) {
+    return String(query || "")
+      .replace(getWheelPattern(), " ")
+      .replace(/\s+/g, " ");
+  }
+
+  function removeFuelPhrases(query) {
+    return String(query || "")
+      .replace(getFuelPattern(), " ")
       .replace(/\s+/g, " ");
   }
 
@@ -240,6 +271,7 @@
     variants.forEach((variant) => {
       output = output.replace(new RegExp(`(^| )${escapeRegExp(variant)}(?= |$)`, "g"), " ");
     });
+    output = output.replace(/(^| )(кузов|кузове|кузова|кузовом|кузон|кузане|кузане|тип кузова)(?= |$)/g, " ");
     return output.replace(/\s+/g, " ").trim();
   }
 
@@ -290,6 +322,12 @@
     return new RegExp(String.raw`(?:пробег(?:ом)?|километраж(?:ем)?|км|km)\s*(?:до|<=|<|меньше|не\s+более|не\s+выше)?\s*${mileageNumber}\s*(?:тыс(?:яч)?|т|к|k|км|km)?|(?:до|<=|<|меньше|не\s+более|не\s+выше)\s*${mileageNumber}\s*(?:тыс(?:яч)?|т|к|k)?\s*(?:км|km|пробег(?:а|ом)?|километраж(?:а|ем)?)`, "gi");
   }
 
+  function getPowerPattern() {
+    const powerNumber = String.raw`\d{2,4}`;
+    const direction = String.raw`от|>=|>|больше|мощнее|свыше|не\s+меньше|до|<=|<|меньше|слабее|не\s+более|не\s+выше`;
+    return new RegExp(String.raw`(?:мощн(?:ость|остью)?|лош(?:ад(?:ей|и|ок)?)?|л\.?\s*с\.?|hp|horsepower)\s*(?:${direction})?\s*${powerNumber}|(?:${direction})?\s*${powerNumber}\s*(?:лош(?:ад(?:ей|и|ок)?)?|л\.?\s*с\.?|hp|horsepower)`, "gi");
+  }
+
   function extractMileage(rawQuery) {
     const text = String(rawQuery || "").toLowerCase().replace(/ё/g, "е");
     const matches = Array.from(text.matchAll(getMileagePattern()));
@@ -297,6 +335,31 @@
       .map((match) => parseMileageValue(match[0]))
       .filter((value) => value >= 1000 && value <= 1000000);
     return mileages.length ? Math.max(...mileages) : null;
+  }
+
+  function extractPower(rawQuery) {
+    const text = String(rawQuery || "").toLowerCase().replace(/ё/g, "е");
+    const matches = Array.from(text.matchAll(getPowerPattern()));
+    const powers = matches
+      .map((match) => {
+        const value = parsePowerValue(match[0]);
+        if (!value) return null;
+        return { value, mode: parsePowerMode(match[0]) };
+      })
+      .filter((item) => item && item.value >= 1 && item.value <= 2000);
+    return powers.length ? powers[powers.length - 1] : null;
+  }
+
+  function parsePowerValue(fragment) {
+    const match = String(fragment || "").match(/\d{2,4}/);
+    return match ? Number(match[0]) : 0;
+  }
+
+  function parsePowerMode(fragment) {
+    const text = String(fragment || "").toLowerCase().replace(/ё/g, "е");
+    if (/(?:до|<=|<|меньше|слабее|не\s+более|не\s+выше)/.test(text)) return "max";
+    if (/(?:от|>=|>|больше|мощнее|свыше|не\s+меньше)/.test(text)) return "min";
+    return "near";
   }
 
   function parseMileageValue(fragment) {
@@ -319,11 +382,36 @@
     return /(?:передний|переднем|передн(?:ий|ем)?\s+привод|fwd|задний|заднем|задн(?:ий|ем)?\s+привод|rwd|полный|полном|полн(?:ый|ом)?\s+привод|полнопривод(?:ный|ная|ное)?|4\s?wd|awd|4\s?вд|4\s?x\s?4)/gi;
   }
 
+  function getWheelPattern() {
+    return /(?:лев(?:ый|ом|ого|ая|ую)?\s+рул(?:ь|е|я|ем)?|рул(?:ь|е|я|ем)?\s+лев(?:ый|ом|ого|ая|ую)?|леворульн(?:ый|ая|ое|ые)?|прав(?:ый|ом|ого|ая|ую)?\s+рул(?:ь|е|я|ем)?|рул(?:ь|е|я|ем)?\s+прав(?:ый|ом|ого|ая|ую)?|праворульн(?:ый|ая|ое|ые)?|\bлев(?:ый|ом|ого|ая|ую)\b|\bправ(?:ый|ом|ого|ая|ую)\b)/gi;
+  }
+
+  function getFuelPattern() {
+    return /(?:бензин(?:овый|овая|овое|овые|е)?|бенз|дизель(?:ный|ная|ное|ные)?|диз|электро|электрич(?:ка|еский|еская|еское|еские)?|ev|гибрид(?:ный|ная|ное|ные)?|hybrid|газ(?:овый|овая|овое|овые)?|метан|пропан)/gi;
+  }
+
   function extractDrive(rawQuery) {
     const text = normalizeText(rawQuery);
     if (/(передний|переднем|передн\s+привод|fwd)/.test(text)) return "передний";
     if (/(задний|заднем|задн\s+привод|rwd)/.test(text)) return "задний";
     if (/(полный|полном|полн\s+привод|полнопривод|4wd|awd|4вд|4 x 4|4x4)/.test(text)) return "полный";
+    return "";
+  }
+
+  function extractWheel(rawQuery) {
+    const text = normalizeText(rawQuery);
+    if (/(левый|левом|левого|левая|левую|лев\s+рул|рул\s+лев|леворульн)/.test(text)) return "левый";
+    if (/(правый|правом|правого|правая|правую|прав\s+рул|рул\s+прав|праворульн)/.test(text)) return "правый";
+    return "";
+  }
+
+  function extractFuel(rawQuery) {
+    const text = normalizeText(rawQuery);
+    if (/(бензин|бенз)/.test(text)) return "бензин";
+    if (/(дизель|диз)/.test(text)) return "дизель";
+    if (/(электро|электрич|ev)/.test(text)) return "электро";
+    if (/(гибрид|hybrid)/.test(text)) return "гибрид";
+    if (/(газ|метан|пропан)/.test(text)) return "газ";
     return "";
   }
 
@@ -389,8 +477,11 @@
     let score = 0;
     if (parsed.budget && car.price > parsed.budget) return -1;
     if (parsed.mileage && parseMileageField(car.mileage) > parsed.mileage) return -1;
+    if (parsed.power && !powerMatches(car.power, parsed.power)) return -1;
     if (parsed.transmission && !transmissionMatches(car.transmission, parsed.transmission)) return -1;
     if (parsed.drive && !driveMatches(car.drive, parsed.drive)) return -1;
+    if (parsed.wheel && !wheelMatches(car.wheel, parsed.wheel)) return -1;
+    if (parsed.fuel && !fuelMatches(car.engine, parsed.fuel)) return -1;
     if (parsed.bodyTypes?.length && !bodyTypeMatches(car.body, parsed.bodyTypes)) return -1;
 
     for (const match of parsed.termMatches) {
@@ -400,6 +491,9 @@
 
     if (parsed.budget && car.price) score += Math.max(0, 3 - Math.floor((parsed.budget - car.price) / 200000));
     if (parsed.mileage && car.mileage) score += Math.max(0, 3 - Math.floor((parsed.mileage - parseMileageField(car.mileage)) / 30000));
+    if (parsed.power) score += 2;
+    if (parsed.wheel) score += 2;
+    if (parsed.fuel) score += 2;
     if (parsed.bodyTypes?.length) score += 2;
     return score;
   }
@@ -431,6 +525,20 @@
     return text ? Number(text) : 0;
   }
 
+  function parsePowerField(value) {
+    const text = String(value || "").replace(/[^\d]/g, "");
+    return text ? Number(text) : 0;
+  }
+
+  function powerMatches(value, requested) {
+    const power = parsePowerField(value);
+    if (!power) return false;
+    if (requested.mode === "max") return power <= requested.value;
+    if (requested.mode === "min") return power >= requested.value;
+    const tolerance = Math.max(15, Math.round(requested.value * 0.1));
+    return power >= requested.value - tolerance && power <= requested.value + tolerance;
+  }
+
   function transmissionMatches(value, requested) {
     const text = normalizeText(value);
     if (!requested) return true;
@@ -444,6 +552,23 @@
     if (requested === "передний") return /перед|front|fwd/.test(text);
     if (requested === "задний") return /зад|rear|rwd/.test(text);
     return /полн|4wd|awd|4вд|4 x 4|4x4/.test(text);
+  }
+
+  function wheelMatches(value, requested) {
+    const text = normalizeText(value);
+    if (!requested) return true;
+    if (requested === "левый") return /лев|left/.test(text);
+    return /прав|right/.test(text);
+  }
+
+  function fuelMatches(value, requested) {
+    const text = normalizeText(value);
+    if (!requested) return true;
+    if (requested === "бензин") return /бенз|gasoline|petrol/.test(text);
+    if (requested === "дизель") return /диз|diesel/.test(text);
+    if (requested === "электро") return /электро|electric|ev/.test(text);
+    if (requested === "гибрид") return /гибрид|hybrid/.test(text);
+    return /газ|метан|пропан|lpg|cng/.test(text);
   }
 
   function bodyTypeMatches(value, requested) {
@@ -514,7 +639,10 @@
       cheap_intent: Boolean(parsed.cheapIntent),
       expensive_intent: Boolean(parsed.expensiveIntent),
       mileage: parsed.mileage || null,
+      power: parsed.power || null,
       drive: parsed.drive || "",
+      wheel: parsed.wheel || "",
+      fuel: parsed.fuel || "",
       body_types: parsed.bodyTypes || [],
       transmission: parsed.transmission || "",
       results_count: cars.length,
@@ -526,7 +654,10 @@
     if (parsed.expensiveIntent) chips.push('<span class="chip">топ дорогих</span>');
     if (parsed.budget) chips.push(`<span class="chip">до ${formatMoney(parsed.budget)}</span>`);
     if (parsed.mileage) chips.push(`<span class="chip">пробег до ${formatMileage(parsed.mileage)}</span>`);
+    if (parsed.power) chips.push(`<span class="chip">${formatPowerChip(parsed.power)}</span>`);
     if (parsed.drive) chips.push(`<span class="chip">${escapeHtml(parsed.drive)} привод</span>`);
+    if (parsed.wheel) chips.push(`<span class="chip">${escapeHtml(parsed.wheel)} руль</span>`);
+    if (parsed.fuel) chips.push(`<span class="chip">${escapeHtml(parsed.fuel)}</span>`);
     (parsed.bodyTypes || []).forEach((type) => chips.push(`<span class="chip">${escapeHtml(type)}</span>`));
     if (parsed.transmission) chips.push(`<span class="chip">${escapeHtml(parsed.transmission)}</span>`);
 
