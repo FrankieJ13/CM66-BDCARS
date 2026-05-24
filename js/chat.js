@@ -322,9 +322,10 @@
 
   function getPriceRangePattern() {
     const number = String.raw`\d+(?:[\s.,]\d+)*`;
+    const decimalNumber = String.raw`\d+[.,]\d+`;
     const unit = String.raw`(?:млн|мил(?:лион(?:а|ов)?)?|m|м|тыс(?:яч)?|тр|к|k)?`;
     const context = String.raw`(?:в\s+пределах|диапазон|бюджет|цена|стоимость|между)`;
-    return new RegExp(String.raw`(?:(?:${context})\s*(?:от|с)?|(?:от|с))\s*${number}\s*${unit}\s*(?:-|—|–|до|и)\s*${number}\s*${unit}|(?:от|с|>=|>|дороже|не\s+дешевле)\s*${number}\s*${unit}`, "gi");
+    return new RegExp(String.raw`${decimalNumber}\s*(?:-|—|–|до)\s*${decimalNumber}\s*(?:млн|мил(?:лион(?:а|ов)?)?|m|м)?|(?:(?:${context})\s*(?:от|с)?|(?:от|с))\s*${number}\s*${unit}\s*(?:-|—|–|до|и)\s*${number}\s*${unit}|(?:от|с|>=|>|дороже|не\s+дешевле)\s*${number}\s*${unit}`, "gi");
   }
 
   function extractBudget(rawQuery) {
@@ -345,6 +346,15 @@
   }
 
   function findBudgetRange(text) {
+    const decimalRange = text.match(/(?:^|\s)(\d+[.,]\d+)\s*(?:-|—|–|до)\s*(\d+[.,]\d+)(?:\s*(млн|мил(?:лион(?:а|ов)?)?|m|м))?(?=\s|$)/i);
+    if (decimalRange) {
+      const first = parseBudgetValue(`${decimalRange[1]} ${decimalRange[3] || ""}`);
+      const second = parseBudgetValue(`${decimalRange[2]} ${decimalRange[3] || ""}`);
+      const min = Math.min(first, second);
+      const max = Math.max(first, second);
+      if (min >= 50000 && max <= 50000000 && min <= max) return { min, max };
+    }
+
     const context = String.raw`(?:в\s+пределах|диапазон|бюджет|цена|стоимость|между)`;
     const number = String.raw`(\d+(?:[\s.,]\d+)*)\s*(млн|мил(?:лион(?:а|ов)?)?|m|м|тыс(?:яч)?|тр|к|k)?`;
     const patterns = [
