@@ -161,13 +161,23 @@
     return `около ${power.value} л.с.`;
   }
 
+  function formatBudgetChip(min, max) {
+    if (min && max) return `${formatMoney(min)}-${formatMoney(max)}`;
+    if (min) return `от ${formatMoney(min)}`;
+    if (max) return `до ${formatMoney(max)}`;
+    return "";
+  }
+
   function parseQuery(rawQuery) {
     const expensiveIntent = extractExpensiveIntent(rawQuery);
     const queryWithoutExpensiveIntent = removeExpensiveIntentPhrases(rawQuery);
     const cheapIntent = extractCheapIntent(queryWithoutExpensiveIntent);
     const mileage = extractMileage(queryWithoutExpensiveIntent);
     const power = extractPower(queryWithoutExpensiveIntent);
-    const explicitBudget = extractBudget(removePowerPhrases(removeMileagePhrases(queryWithoutExpensiveIntent)));
+    const budgetQuery = removePowerPhrases(removeMileagePhrases(queryWithoutExpensiveIntent));
+    const priceRange = extractPriceRange(budgetQuery);
+    const explicitBudget = priceRange.max || (!priceRange.min ? extractBudget(budgetQuery) : null);
+    const budgetMin = priceRange.min || null;
     const budget = explicitBudget || (cheapIntent ? 200000 : null);
     const drive = extractDrive(queryWithoutExpensiveIntent);
     const wheel = extractWheel(queryWithoutExpensiveIntent);
@@ -193,6 +203,7 @@
 
     return {
       budget,
+      budgetMin,
       cheapIntent,
       expensiveIntent,
       mileage,
@@ -229,6 +240,7 @@
 
   function removeBudgetPhrases(query) {
     return String(query || "")
+      .replace(getPriceRangePattern(), " ")
       .replace(getBudgetPattern(), " ")
       .replace(/\s+/g, " ");
   }
@@ -305,7 +317,14 @@
   }
 
   function getBudgetPattern() {
-    return /(?:до|<=|<|меньше|дешевле|не\s+дороже|бюджет(?:ом)?|цена\s+до|стоимость\s+до)?\s*\d+(?:[\s.,]\d+)*\s*(?:млн|мил(?:лион(?:а|ов)?)?|m|м|тыс(?:яч)?|тр|к|k)(?=$|\s|[.,!?])|(?:до|<=|<|меньше|дешевле|не\s+дороже|бюджет(?:ом)?|цена\s+до|стоимость\s+до)\s*\d+(?:[\s.,]\d+)*|\b[1-9]\d{5,7}\b/gi;
+    return /(?:от|с|>=|>|дороже|не\s+дешевле|до|<=|<|меньше|дешевле|не\s+дороже|бюджет(?:ом)?|цена\s+до|стоимость\s+до)?\s*\d+(?:[\s.,]\d+)*\s*(?:млн|мил(?:лион(?:а|ов)?)?|m|м|тыс(?:яч)?|тр|к|k)(?=$|\s|[.,!?])|(?:от|с|>=|>|дороже|не\s+дешевле|до|<=|<|меньше|дешевле|не\s+дороже|бюджет(?:ом)?|цена\s+до|стоимость\s+до)\s*\d+(?:[\s.,]\d+)*|\b[1-9]\d{5,7}\b/gi;
+  }
+
+  function getPriceRangePattern() {
+    const number = String.raw`\d+(?:[\s.,]\d+)*`;
+    const unit = String.raw`(?:млн|мил(?:лион(?:а|ов)?)?|m|м|тыс(?:яч)?|тр|к|k)?`;
+    const context = String.raw`(?:в\s+пределах|диапазон|бюджет|цена|стоимость|между)`;
+    return new RegExp(String.raw`(?:(?:${context})\s*(?:от|с)?|(?:от|с))\s*${number}\s*${unit}\s*(?:-|—|–|до|и)\s*${number}\s*${unit}|(?:от|с|>=|>|дороже|не\s+дешевле)\s*${number}\s*${unit}`, "gi");
   }
 
   function extractBudget(rawQuery) {
@@ -315,6 +334,40 @@
       .map((match) => parseBudgetValue(match[0]))
       .filter((value) => value >= 50000 && value <= 50000000);
     return budgets.length ? Math.max(...budgets) : null;
+  }
+
+  function extractPriceRange(rawQuery) {
+    const text = String(rawQuery || "").toLowerCase().replace(/ё/g, "е");
+    const range = findBudgetRange(text);
+    if (range) return range;
+    const min = findBudgetMin(text);
+    return min ? { min, max: null } : { min: null, max: null };
+  }
+
+  function findBudgetRange(text) {
+    const context = String.raw`(?:в\s+пределах|диапазон|бюджет|цена|стоимость|между)`;
+    const number = String.raw`(\d+(?:[\s.,]\d+)*)\s*(млн|мил(?:лион(?:а|ов)?)?|m|м|тыс(?:яч)?|тр|к|k)?`;
+    const patterns = [
+      new RegExp(String.raw`(?:от|с)\s*${number}\s*(?:-|—|–|до|и)\s*${number}`, "i"),
+      new RegExp(String.raw`${context}\s*(?:от|с)?\s*${number}\s*(?:-|—|–|до|и)\s*${number}`, "i")
+    ];
+    for (const pattern of patterns) {
+      const match = text.match(pattern);
+      if (!match) continue;
+      const first = parseBudgetValue(`${match[1]} ${match[2] || match[4] || ""}`);
+      const second = parseBudgetValue(`${match[3]} ${match[4] || match[2] || ""}`);
+      const min = Math.min(first, second);
+      const max = Math.max(first, second);
+      if (min >= 50000 && max <= 50000000 && min <= max) return { min, max };
+    }
+    return null;
+  }
+
+  function findBudgetMin(text) {
+    const match = text.match(/(?:от|с|>=|>|дороже|не\s+дешевле)\s*(\d+(?:[\s.,]\d+)*)\s*(млн|мил(?:лион(?:а|ов)?)?|m|м|тыс(?:яч)?|тр|к|k)?/i);
+    if (!match) return null;
+    const value = parseBudgetValue(`${match[1]} ${match[2] || ""}`);
+    return value >= 50000 && value <= 50000000 ? value : null;
   }
 
   function getMileagePattern() {
@@ -475,6 +528,7 @@
   function scoreCar(car, parsed) {
     const text = carSearchText(car);
     let score = 0;
+    if (parsed.budgetMin && car.price < parsed.budgetMin) return -1;
     if (parsed.budget && car.price > parsed.budget) return -1;
     if (parsed.mileage && parseMileageField(car.mileage) > parsed.mileage) return -1;
     if (parsed.power && !powerMatches(car.power, parsed.power)) return -1;
@@ -490,6 +544,7 @@
     }
 
     if (parsed.budget && car.price) score += Math.max(0, 3 - Math.floor((parsed.budget - car.price) / 200000));
+    if (parsed.budgetMin && car.price) score += Math.max(0, 3 - Math.floor((car.price - parsed.budgetMin) / 200000));
     if (parsed.mileage && car.mileage) score += Math.max(0, 3 - Math.floor((parsed.mileage - parseMileageField(car.mileage)) / 30000));
     if (parsed.power) score += 2;
     if (parsed.wheel) score += 2;
@@ -636,6 +691,7 @@
       parsed_terms: parsed.canonicalTerms,
       raw_terms: parsed.terms,
       budget: parsed.budget || null,
+      budget_min: parsed.budgetMin || null,
       cheap_intent: Boolean(parsed.cheapIntent),
       expensive_intent: Boolean(parsed.expensiveIntent),
       mileage: parsed.mileage || null,
@@ -652,7 +708,7 @@
     const chips = parsed.canonicalTerms.map((term) => `<span class="chip">${escapeHtml(term)}</span>`);
     if (parsed.cheapIntent) chips.push('<span class="chip">самые дешевые</span>');
     if (parsed.expensiveIntent) chips.push('<span class="chip">топ дорогих</span>');
-    if (parsed.budget) chips.push(`<span class="chip">до ${formatMoney(parsed.budget)}</span>`);
+    if (parsed.budget || parsed.budgetMin) chips.push(`<span class="chip">${escapeHtml(formatBudgetChip(parsed.budgetMin, parsed.budget))}</span>`);
     if (parsed.mileage) chips.push(`<span class="chip">пробег до ${formatMileage(parsed.mileage)}</span>`);
     if (parsed.power) chips.push(`<span class="chip">${formatPowerChip(parsed.power)}</span>`);
     if (parsed.drive) chips.push(`<span class="chip">${escapeHtml(parsed.drive)} привод</span>`);
