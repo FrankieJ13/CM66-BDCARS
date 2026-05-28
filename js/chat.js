@@ -168,22 +168,29 @@
     return "";
   }
 
+  function formatYearChip(yearRange) {
+    if (!yearRange) return "";
+    return yearRange.min === yearRange.max ? String(yearRange.min) : `${yearRange.min}-${yearRange.max}`;
+  }
+
   function parseQuery(rawQuery) {
     const expensiveIntent = extractExpensiveIntent(rawQuery);
     const queryWithoutExpensiveIntent = removeExpensiveIntentPhrases(rawQuery);
     const cheapIntent = extractCheapIntent(queryWithoutExpensiveIntent);
-    const mileage = extractMileage(queryWithoutExpensiveIntent);
-    const power = extractPower(queryWithoutExpensiveIntent);
-    const budgetQuery = removePowerPhrases(removeMileagePhrases(queryWithoutExpensiveIntent));
+    const yearRange = extractYearRange(queryWithoutExpensiveIntent);
+    const queryWithoutYears = removeYearPhrases(queryWithoutExpensiveIntent);
+    const mileage = extractMileage(queryWithoutYears);
+    const power = extractPower(queryWithoutYears);
+    const budgetQuery = removePowerPhrases(removeMileagePhrases(queryWithoutYears));
     const priceRange = extractPriceRange(budgetQuery);
     const explicitBudget = priceRange.max || (!priceRange.min ? extractBudget(budgetQuery) : null);
     const budgetMin = priceRange.min || null;
     const budget = explicitBudget || (cheapIntent ? 200000 : null);
-    const drive = extractDrive(queryWithoutExpensiveIntent);
-    const wheel = extractWheel(queryWithoutExpensiveIntent);
-    const fuel = extractFuel(queryWithoutExpensiveIntent);
-    const bodyTypes = extractBodyTypes(queryWithoutExpensiveIntent);
-    const query = compactKnownPhrases(removeBodyTypePhrases(normalizeText(removeFuelPhrases(removeWheelPhrases(removeCheapIntentPhrases(removeDrivePhrases(removeBudgetPhrases(removePowerPhrases(removeMileagePhrases(queryWithoutExpensiveIntent))))))))));
+    const drive = extractDrive(queryWithoutYears);
+    const wheel = extractWheel(queryWithoutYears);
+    const fuel = extractFuel(queryWithoutYears);
+    const bodyTypes = extractBodyTypes(queryWithoutYears);
+    const query = compactKnownPhrases(removeBodyTypePhrases(normalizeText(removeFuelPhrases(removeWheelPhrases(removeCheapIntentPhrases(removeDrivePhrases(removeBudgetPhrases(removePowerPhrases(removeMileagePhrases(queryWithoutYears))))))))));
     const automaticWords = dictionary.transmissions?.automatic || [];
     const manualWords = dictionary.transmissions?.manual || [];
     const stopWords = dictionary.stopWords || [];
@@ -206,6 +213,7 @@
       budgetMin,
       cheapIntent,
       expensiveIntent,
+      yearRange,
       mileage,
       power,
       drive,
@@ -242,6 +250,13 @@
     return String(query || "")
       .replace(getPriceRangePattern(), " ")
       .replace(getBudgetPattern(), " ")
+      .replace(/\s+/g, " ");
+  }
+
+  function removeYearPhrases(query) {
+    return String(query || "")
+      .replace(getYearRangePattern(), " ")
+      .replace(getYearTokenPattern(), " ")
       .replace(/\s+/g, " ");
   }
 
@@ -318,6 +333,49 @@
 
   function getBudgetPattern() {
     return /(?:от|с|>=|>|дороже|не\s+дешевле|до|<=|<|меньше|дешевле|не\s+дороже|бюджет(?:ом)?|цена\s+до|стоимость\s+до)?\s*\d+(?:[\s.,]\d+)*\s*(?:млн|мил(?:лион(?:а|ов)?)?|m|м|тыс(?:яч)?|тр|к|k)(?=$|\s|[.,!?])|(?:от|с|>=|>|дороже|не\s+дешевле|до|<=|<|меньше|дешевле|не\s+дороже|бюджет(?:ом)?|цена\s+до|стоимость\s+до)\s*\d+(?:[\s.,]\d+)*|\b[1-9]\d{5,7}\b/gi;
+  }
+
+  function getYearTokenPattern() {
+    return /\b(?:19|20)[\dа-яёa-z]{2,3}\b/gi;
+  }
+
+  function getYearRangePattern() {
+    return /\b(?:19|20)[\dа-яёa-z]{2,3}\s*(?:-|—|–|до|по)\s*(?:(?:19|20)?[\dа-яёa-z]{2,3})\b/gi;
+  }
+
+  function extractYearRange(rawQuery) {
+    const text = String(rawQuery || "").toLowerCase().replace(/ё/g, "е");
+    const rangeMatch = text.match(getYearRangePattern());
+    if (rangeMatch) {
+      const years = rangeMatch[0]
+        .split(/-|—|–|до|по/i)
+        .map((item) => coerceYearValue(item))
+        .filter(Boolean);
+      if (years.length >= 2) return normalizeYearRange(years[0], years[1]);
+    }
+
+    const yearMatches = Array.from(text.matchAll(getYearTokenPattern()))
+      .map((match) => coerceYearValue(match[0]))
+      .filter(Boolean);
+    return yearMatches.length ? normalizeYearRange(yearMatches[yearMatches.length - 1], yearMatches[yearMatches.length - 1]) : null;
+  }
+
+  function coerceYearValue(fragment) {
+    const digits = String(fragment || "").replace(/[^\d]/g, "");
+    if (digits.length === 2) {
+      const value = Number(digits);
+      const year = value <= 30 ? 2000 + value : 1900 + value;
+      return year >= 1990 && year <= 2030 ? year : null;
+    }
+    if (digits.length !== 4) return null;
+    const year = Number(digits);
+    return year >= 1990 && year <= 2030 ? year : null;
+  }
+
+  function normalizeYearRange(first, second) {
+    const min = Math.min(first, second);
+    const max = Math.max(first, second);
+    return { min, max };
   }
 
   function getPriceRangePattern() {
@@ -538,6 +596,7 @@
   function scoreCar(car, parsed) {
     const text = carSearchText(car);
     let score = 0;
+    if (parsed.yearRange && !yearMatches(car.year, parsed.yearRange)) return -1;
     if (parsed.budgetMin && car.price < parsed.budgetMin) return -1;
     if (parsed.budget && car.price > parsed.budget) return -1;
     if (parsed.mileage && parseMileageField(car.mileage) > parsed.mileage) return -1;
@@ -555,6 +614,7 @@
 
     if (parsed.budget && car.price) score += Math.max(0, 3 - Math.floor((parsed.budget - car.price) / 200000));
     if (parsed.budgetMin && car.price) score += Math.max(0, 3 - Math.floor((car.price - parsed.budgetMin) / 200000));
+    if (parsed.yearRange) score += 3;
     if (parsed.mileage && car.mileage) score += Math.max(0, 3 - Math.floor((parsed.mileage - parseMileageField(car.mileage)) / 30000));
     if (parsed.power) score += 2;
     if (parsed.wheel) score += 2;
@@ -593,6 +653,17 @@
   function parsePowerField(value) {
     const text = String(value || "").replace(/[^\d]/g, "");
     return text ? Number(text) : 0;
+  }
+
+  function parseCarYear(value) {
+    const match = String(value || "").match(/\d{4}/);
+    return match ? Number(match[0]) : 0;
+  }
+
+  function yearMatches(value, yearRange) {
+    const year = parseCarYear(value);
+    if (!year) return false;
+    return year >= yearRange.min && year <= yearRange.max;
   }
 
   function powerMatches(value, requested) {
@@ -704,6 +775,7 @@
       budget_min: parsed.budgetMin || null,
       cheap_intent: Boolean(parsed.cheapIntent),
       expensive_intent: Boolean(parsed.expensiveIntent),
+      year_range: parsed.yearRange || null,
       mileage: parsed.mileage || null,
       power: parsed.power || null,
       drive: parsed.drive || "",
@@ -718,6 +790,7 @@
     const chips = parsed.canonicalTerms.map((term) => `<span class="chip">${escapeHtml(term)}</span>`);
     if (parsed.cheapIntent) chips.push('<span class="chip">самые дешевые</span>');
     if (parsed.expensiveIntent) chips.push('<span class="chip">топ дорогих</span>');
+    if (parsed.yearRange) chips.push(`<span class="chip">${escapeHtml(formatYearChip(parsed.yearRange))}</span>`);
     if (parsed.budget || parsed.budgetMin) chips.push(`<span class="chip">${escapeHtml(formatBudgetChip(parsed.budgetMin, parsed.budget))}</span>`);
     if (parsed.mileage) chips.push(`<span class="chip">пробег до ${formatMileage(parsed.mileage)}</span>`);
     if (parsed.power) chips.push(`<span class="chip">${formatPowerChip(parsed.power)}</span>`);
