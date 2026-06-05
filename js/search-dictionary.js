@@ -35,6 +35,16 @@
     return x;
   }
 
+  function typoVariants(s) {
+    const x = String(s).trim().toLowerCase();
+    const squeezed = x.replace(/([a-zа-яё])\1+/gi, "$1");
+    const out = [squeezed];
+    out.push(squeezed.replace(/[\s\-_.]+/g, ""));
+    out.push(squeezed.replace(/[\s_.]+/g, "-"));
+    out.push(squeezed.replace(/[\-_.]+/g, " "));
+    return uniq(out.filter(v => v && v !== x));
+  }
+
   function compactVariants(s) {
     const x = String(s).trim().toLowerCase();
     const base = [x];
@@ -61,36 +71,39 @@
     const raw = uniq([name, ...compactVariants(name), ...extra]);
     const out = [];
     for (const a of raw) {
-      out.push(a);
-      out.push(translitRuToLat(a));
-      out.push(roughLatinToRu(a));
-      out.push(a.replace(/ё/g, "е"));
-      out.push(a.replace(/[\s\-_.]+/g, ""));
-      out.push(a.replace(/([a-zа-я]+)(\d+)/gi, "$1 $2"));
-      out.push(a.replace(/(\d+)([a-zа-я]+)/gi, "$1 $2"));
+      const forms = [
+        a,
+        translitRuToLat(a),
+        roughLatinToRu(a),
+        a.replace(/ё/g, "е"),
+        a.replace(/[\s\-_.]+/g, ""),
+        a.replace(/([a-zа-я]+)(\d+)/gi, "$1 $2"),
+        a.replace(/(\d+)([a-zа-я]+)/gi, "$1 $2")
+      ];
+      for (const form of forms) out.push(form, ...typoVariants(form));
     }
     return uniq(out);
   }
 
   const brandAliases = {
-    "Volkswagen": ["vw", "vag", "фольц", "фолькс", "фольцваген", "фольксваген", "вольксваген", "ваген", "ваг"],
+    "Volkswagen": ["vw", "vag", "фв", "фольц", "фолькс", "фольс", "фольцваген", "фольксваген", "фольсваген", "вольксваген", "ваген", "ваг"],
     "Lada (ВАЗ)": ["lada", "лада", "vaz", "ваз", "жигули", "автоваз", "ваз лада", "лада ваз"],
     "ВАЗ (LADA)": ["lada", "лада", "vaz", "ваз", "жигули", "автоваз", "ваз лада", "лада ваз"],
-    "Toyota": ["тойота", "таета", "тоета", "тайота"],
+    "Toyota": ["тойота", "таета", "тоета", "тайота", "тойта", "таёта"],
     "Nissan": ["ниссан", "нисан"],
     "Kia": ["kia", "киа", "кия"],
     "KIA": ["kia", "киа", "кия"],
-    "Hyundai": ["хендай", "хундай", "хендэ", "хундай", "хёндэ"],
+    "Hyundai": ["хендай", "хундай", "хендэ", "хенде", "хёндэ", "хёндай", "хёнде"],
     "Renault": ["рено"],
     "Ford": ["форд"],
     "Mazda": ["мазда"],
     "Skoda": ["шкода", "skoda", "škoda"],
     "BMW": ["бмв", "бэмвэ", "беэмве"],
-    "Mercedes-Benz": ["mercedes", "мерседес", "мерс", "мерин", "бенц", "benz"],
+    "Mercedes-Benz": ["mercedes", "мерседес", "мерседез", "мерседец", "мерс", "мерин", "бенц", "benz"],
     "Audi": ["ауди"],
     "Chery": ["чери", "черри"],
-    "Geely": ["джили", "жили", "гили"],
-    "Haval": ["хавал", "хавейл"],
+    "Geely": ["джили", "джилли", "жили", "гили"],
+    "Haval": ["хавал", "хавейл", "хавэйл"],
     "Chevrolet": ["chevy", "шевроле", "шеви"],
     "Mitsubishi": ["митсубиси", "мицубиси", "митсубиши"],
     "Honda": ["хонда"],
@@ -103,7 +116,7 @@
     "Daewoo": ["дэу", "деу", "дайву"],
     "Datsun": ["датсун"],
     "Omoda": ["омода"],
-    "Exeed": ["эксид", "ексид", "exeed"],
+    "Exeed": ["эксид", "ексид", "эксит", "exeed"],
     "Lifan": ["лифан"],
     "УАЗ": ["uaz", "уаз"],
     "Belgee": ["белджи", "белги", "белджи"],
@@ -120,9 +133,9 @@
     "Great Wall": ["greatwall", "грейтуолл", "грейт волл", "грейт вол", "ховер"],
     "Infiniti": ["инфинити", "инфинити"],
     "JAC": ["джак", "жак"],
-    "Jaecoo": ["джейку", "джеку", "джайку"],
+    "Jaecoo": ["джейку", "джеку", "джайку", "джейко", "джеко"],
     "Jeep": ["джип"],
-    "Jetour": ["джетур", "жетур"],
+    "Jetour": ["джетур", "жетур", "джетор", "жетор"],
     "Land Rover": ["landrover", "лэнд ровер", "ленд ровер", "ровер"],
     "Livan": ["ливан"],
     "Lynk & Co": ["lynk co", "lynk&co", "линк ко", "линк энд ко", "линк и ко"],
@@ -264,23 +277,23 @@
     "Tiguan": ["тигуан", "тиг"], "Polo": ["поло"], "Passat": ["пассат", "пасат"], "Jetta": ["джетта", "джета"],
     "Touareg": ["туарег", "таурег"], "Vesta": ["веста"], "Granta": ["гранта"], "Camry": ["камри"],
     "Corolla": ["королла", "корола"], "Corolla Cross": ["королла кросс", "корола кросс"], "RAV4": ["rav", "рав4", "рав", "рав 4"], "Rio": ["рио"],
-    "Sportage": ["спортейдж", "спортаж"], "Solaris": ["солярис"], "Creta": ["крета"], "Logan": ["логан"],
+    "Sportage": ["спортейдж", "спортаж", "спортэдж"], "Solaris": ["солярис", "салярис"], "Creta": ["крета", "крэтa"], "Logan": ["логан"],
     "Duster": ["дастер"], "Focus": ["фокус"], "Octavia": ["октавия"], "X-Trail": ["икстрейл", "икс трейл"],
-    "Qashqai": ["кашкай", "кашкай"], "Priora": ["приора"], "Kalina": ["калина"], "Largus": ["ларгус"],
+    "Qashqai": ["кашкай", "кашак", "кашкай"], "Priora": ["приора"], "Kalina": ["калина"], "Largus": ["ларгус"],
     "Niva": ["нива"], "Almera": ["альмера"], "Teana": ["теана"], "Murano": ["мурано"],
     "Ceed": ["сид", "сиед"], "Cerato": ["церато", "серато"], "Optima": ["оптима"], "Elantra": ["элантра"],
-    "Tucson": ["туссан", "туксон", "тюксон"], "Santa Fe": ["санта фе"], "Sandero": ["сандеро"],
+    "Tucson": ["туссан", "туcсан", "тусан", "туксон", "тюксон"], "Santa Fe": ["санта фе", "сантафе"], "Sandero": ["сандеро"],
     "Kaptur": ["каптур"], "Captur": ["каптюр", "каптур"], "Mondeo": ["мондео"], "Kuga": ["куга"],
     "CX-5": ["сх5", "сх 5", "ц икс 5"], "Mazda3": ["мазда3", "мазда 3"], "Mazda6": ["мазда6", "мазда 6"],
-    "Outlander": ["аутлендер"], "Lancer": ["лансер"], "ASX": ["асх"], "Civic": ["цивик", "сивик"],
+    "Outlander": ["аутлендер", "аут"], "Lancer": ["лансер"], "ASX": ["асх"], "Civic": ["цивик", "сивик"],
     "CR-V": ["срв", "црв"], "Forester": ["форестер"], "Legacy": ["легаси"], "Swift": ["свифт"],
     "Grand Vitara": ["гранд витара"], "Astra": ["астра"], "Mokka": ["мокка"], "Cobalt": ["кобальт"],
     "Cruze": ["круз"], "Nexia": ["нексия"], "Matiz": ["матиз"], "Jolion": ["джолион"],
-    "Tiggo": ["тигго", "тиго"], "Coolray": ["кулрей"], "Atlas": ["атлас"], "Allion": ["аллион"],
+    "Tiggo": ["тигго", "тиго"], "Coolray": ["кулрей", "кулрэй", "кулрай"], "Atlas": ["атлас"], "Allion": ["аллион"],
     "Auris": ["аурис"], "Avensis": ["авенсис"], "C-HR": ["снр", "с нр", "си эйч ар"],
-    "Highlander": ["хайлендер"], "Land Cruiser": ["крузак", "ленд крузер", "лэнд крузер"], "Prado": ["прадо"],
+    "Highlander": ["хайлендер", "хай"], "Land Cruiser": ["крузак", "ленд крузер", "лэнд крузер", "лк", "lc"], "Prado": ["прадо", "прадик"],
     "Aqua": ["аква"], "Note": ["ноут"], "Tiida": ["тиида"], "Juke": ["жук", "джук"], "Pathfinder": ["патфайндер"],
-    "Soul": ["соул"], "Seltos": ["селтос"], "Sorento": ["соренто"], "Stinger": ["стингер"],
+    "Soul": ["соул", "соул"], "Seltos": ["селтос"], "Sorento": ["соренто", "саренто"], "Stinger": ["стингер"],
     "Getz": ["гетц", "гец"], "Sonata": ["соната"], "Fluence": ["флюенс"], "Megane": ["меган"],
     "Kodiaq": ["кодиак"], "Rapid": ["рапид"], "Superb": ["суперб"], "Yeti": ["йети"],
     "Golf": ["гольф"], "Caddy": ["кадди"], "Transporter": ["транспортер"],
@@ -288,7 +301,8 @@
     "X1": ["х1", "икс1", "икс 1"], "X3": ["х3", "икс3", "икс 3"], "X5": ["х5", "икс5", "икс 5"],
     "C-Class": ["ц класс", "с класс", "цешка"], "E-Class": ["е класс", "ешка"],
     "GLA": ["гла"], "GLC": ["глц"], "Aveo": ["авео"], "Captiva": ["каптива"], "Lacetti": ["лачетти", "лачети"],
-    "Monjaro": ["монжаро"], "Dargo": ["дарго"], "Patriot": ["патриот"], "Hunter": ["хантер"], "Bukhanka": ["буханка"]
+    "Jolion": ["джолион", "жолион"],
+    "Monjaro": ["монжаро", "манджаро"], "Dargo": ["дарго", "дарго"], "Patriot": ["патриот"], "Hunter": ["хантер"], "Bukhanka": ["буханка"]
   };
 
   const extraManualModelAliases = {
@@ -610,7 +624,7 @@
     "A6": ["а6", "а 6", "a6"],
     "Kona": ["кона"],
     "Carnival": ["карнивал"],
-    "Tugella": ["тугелла"],
+    "Tugella": ["тугелла", "тугела", "тугелла джили", "тугела джили"],
     "Equinox": ["эквинокс"],
     "Bronco Sport": ["бронко спорт"],
     "Ridgeline": ["риджлайн"],
@@ -705,7 +719,10 @@
     "corolla-fielder": ["корола филдер"],
     "corolla-axio": ["корола аксио"],
     "corolla-verso": ["корола версо"],
-    "spacio": ["корола спасио"]
+    "spacio": ["корола спасио"],
+    "rav4": ["равчик", "рав 4", "равчик 4"],
+    "land-cruiser-prado": ["прадик"],
+    "land-cruiser": ["лк", "lc"]
   };
 
   Object.entries(finalModelAliases).forEach(([slug, aliases]) => {
@@ -715,7 +732,7 @@
 
   // Extra common ambiguous numeric model shortcuts. They help with queries like "мазда 3", "ауди а6", "танк 300".
   for (const item of modelMap.values()) {
-    item.aliases = uniq(item.aliases.map(a => a.replace(/ё/g, "е")).concat(item.aliases));
+    item.aliases = uniq(item.aliases.flatMap(a => [a, a.replace(/ё/g, "е"), ...typoVariants(a)]));
   }
 
   window.AUTO_ASSISTANT_DICTIONARY = {
