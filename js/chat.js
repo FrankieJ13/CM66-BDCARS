@@ -256,6 +256,7 @@
   function removeYearPhrases(query) {
     return String(query || "")
       .replace(getYearRangePattern(), " ")
+      .replace(getYearPhrasePattern(), " ")
       .replace(getYearTokenPattern(), " ")
       .replace(/\s+/g, " ");
   }
@@ -339,6 +340,10 @@
     return /\b(?:19|20)[\dа-яёa-z]{2,3}\b/gi;
   }
 
+  function getYearPhrasePattern() {
+    return /(?:от|с|начиная\s+с|после|моложе|свежее|свеж(?:ий|ая|ее|ие)|не\s+старше)\s+(?:19|20)[\dа-яёa-z]{2,3}(?:\s*г(?:од|ода|оду)?\.?)?|(?:до|по|раньше|старше|не\s+новее)\s+(?:19|20)[\dа-яёa-z]{2,3}(?:\s*г(?:од|ода|оду)?\.?)?|(?:19|20)[\dа-яёa-z]{2,3}\s*г(?:од|ода|оду)?\.?/gi;
+  }
+
   function getYearRangePattern() {
     return /\b(?:19|20)[\dа-яёa-z]{2,3}\s*(?:-|—|–|до|по)\s*(?:(?:19|20)?[\dа-яёa-z]{2,3})\b/gi;
   }
@@ -352,6 +357,17 @@
         .map((item) => coerceYearValue(item))
         .filter(Boolean);
       if (years.length >= 2) return normalizeYearRange(years[0], years[1]);
+    }
+
+    const phraseMatch = text.match(getYearPhrasePattern());
+    if (phraseMatch) {
+      const phrase = phraseMatch[phraseMatch.length - 1];
+      const year = coerceYearValue(phrase);
+      if (year) {
+        if (/(?:от|с|начиная\s+с|после|моложе|свежее|свеж|не\s+старше)/.test(phrase)) return { min: year, max: 2030 };
+        if (/(?:до|по|раньше|старше|не\s+новее)/.test(phrase)) return { min: 1990, max: year };
+        return normalizeYearRange(year, year);
+      }
     }
 
     const yearMatches = Array.from(text.matchAll(getYearTokenPattern()))
@@ -383,7 +399,8 @@
     const decimalNumber = String.raw`\d+[.,]\d+`;
     const unit = String.raw`(?:млн|мил(?:лион(?:а|ов)?)?|m|м|тыс(?:яч)?|тр|к|k)?`;
     const context = String.raw`(?:в\s+пределах|диапазон|бюджет|цена|стоимость|между)`;
-    return new RegExp(String.raw`${decimalNumber}\s*(?:-|—|–|до)\s*${decimalNumber}\s*(?:млн|мил(?:лион(?:а|ов)?)?|m|м)?|(?:(?:${context})\s*(?:от|с)?|(?:от|с))\s*${number}\s*${unit}\s*(?:-|—|–|до|и)\s*${number}\s*${unit}|(?:от|с|>=|>|дороже|не\s+дешевле)\s*${number}\s*${unit}`, "gi");
+    const approx = String.raw`(?:около|примерно|плюс\s*минус|в\s+районе|район|ориентир|ориентировочно)`;
+    return new RegExp(String.raw`${approx}\s*${number}\s*${unit}|${decimalNumber}\s*(?:-|—|–|до)\s*${decimalNumber}\s*(?:млн|мил(?:лион(?:а|ов)?)?|m|м)?|(?:(?:${context})\s*(?:от|с)?|(?:от|с))\s*${number}\s*${unit}\s*(?:-|—|–|до|и)\s*${number}\s*${unit}|(?:от|с|>=|>|дороже|не\s+дешевле|хотя\s+бы|минимум)\s*${number}\s*${unit}`, "gi");
   }
 
   function extractBudget(rawQuery) {
@@ -399,8 +416,19 @@
     const text = String(rawQuery || "").toLowerCase().replace(/ё/g, "е");
     const range = findBudgetRange(text);
     if (range) return range;
+    const approx = findBudgetApprox(text);
+    if (approx) return approx;
     const min = findBudgetMin(text);
     return min ? { min, max: null } : { min: null, max: null };
+  }
+
+  function findBudgetApprox(text) {
+    const match = text.match(/(?:около|примерно|плюс\s*минус|в\s+районе|район|ориентир|ориентировочно)\s*(\d+(?:[\s.,]\d+)*)\s*(млн|мил(?:лион(?:а|ов)?)?|m|м|тыс(?:яч)?|тр|к|k)?/i);
+    if (!match) return null;
+    const value = parseBudgetValue(`${match[1]} ${match[2] || ""}`);
+    if (value < 50000 || value > 50000000) return null;
+    const spread = Math.max(50000, Math.round(value * 0.1));
+    return { min: Math.max(50000, value - spread), max: Math.min(50000000, value + spread) };
   }
 
   function findBudgetRange(text) {
@@ -432,7 +460,7 @@
   }
 
   function findBudgetMin(text) {
-    const match = text.match(/(?:от|с|>=|>|дороже|не\s+дешевле)\s*(\d+(?:[\s.,]\d+)*)\s*(млн|мил(?:лион(?:а|ов)?)?|m|м|тыс(?:яч)?|тр|к|k)?/i);
+    const match = text.match(/(?:от|с|>=|>|дороже|не\s+дешевле|хотя\s+бы|минимум)\s*(\d+(?:[\s.,]\d+)*)\s*(млн|мил(?:лион(?:а|ов)?)?|m|м|тыс(?:яч)?|тр|к|k)?/i);
     if (!match) return null;
     const value = parseBudgetValue(`${match[1]} ${match[2] || ""}`);
     return value >= 50000 && value <= 50000000 ? value : null;
