@@ -161,6 +161,15 @@
     return `около ${power.value} л.с.`;
   }
 
+  function formatEngineChip(engine) {
+    if (!engine) return "";
+    const format = (value) => Number(value).toLocaleString("ru-RU", { maximumFractionDigits: 1 });
+    if (engine.min && engine.max) return `${format(engine.min)}-${format(engine.max)} л`;
+    if (engine.mode === "max") return `до ${format(engine.value)} л`;
+    if (engine.mode === "min") return `от ${format(engine.value)} л`;
+    return `около ${format(engine.value)} л`;
+  }
+
   function formatBudgetChip(min, max) {
     if (min && max) return `${formatMoney(min)}-${formatMoney(max)}`;
     if (min) return `от ${formatMoney(min)}`;
@@ -186,11 +195,13 @@
     const explicitBudget = priceRange.max || (!priceRange.min ? extractBudget(budgetQuery) : null);
     const budgetMin = priceRange.min || null;
     const budget = explicitBudget || (cheapIntent ? 200000 : null);
+    const queryWithoutBudget = removeBudgetPhrases(queryWithoutYears);
+    const engine = extractEngine(queryWithoutBudget) || extractEngineBeforeBudget(queryWithoutYears);
     const drive = extractDrive(queryWithoutYears);
     const wheel = extractWheel(queryWithoutYears);
     const fuel = extractFuel(queryWithoutYears);
     const bodyTypes = extractBodyTypes(queryWithoutYears);
-    const query = compactKnownPhrases(removeBodyTypePhrases(normalizeText(removeFuelPhrases(removeWheelPhrases(removeCheapIntentPhrases(removeDrivePhrases(removeBudgetPhrases(removePowerPhrases(removeMileagePhrases(queryWithoutYears))))))))));
+    const query = compactKnownPhrases(removeBodyTypePhrases(normalizeText(removeFuelPhrases(removeWheelPhrases(removeEnginePhrases(removeCheapIntentPhrases(removeDrivePhrases(removeBudgetPhrases(removePowerPhrases(removeMileagePhrases(queryWithoutYears)))))))))));
     const automaticWords = dictionary.transmissions?.automatic || [];
     const manualWords = dictionary.transmissions?.manual || [];
     const stopWords = dictionary.stopWords || [];
@@ -216,6 +227,7 @@
       yearRange,
       mileage,
       power,
+      engine,
       drive,
       wheel,
       fuel,
@@ -270,6 +282,13 @@
   function removePowerPhrases(query) {
     return String(query || "")
       .replace(getPowerPattern(), " ")
+      .replace(/\s+/g, " ");
+  }
+
+  function removeEnginePhrases(query) {
+    return String(query || "")
+      .replace(getEngineRangePattern(), " ")
+      .replace(getEnginePattern(), " ")
       .replace(/\s+/g, " ");
   }
 
@@ -333,7 +352,8 @@
   }
 
   function getBudgetPattern() {
-    return /(?:от|с|>=|>|дороже|не\s+дешевле|до|<=|<|меньше|дешевле|не\s+дороже|бюджет(?:ом)?|цена\s+до|стоимость\s+до)?\s*\d+(?:[\s.,]\d+)*\s*(?:млн|мил(?:лион(?:а|ов)?)?|m|м|тыс(?:яч)?|тр|к|k)(?=$|\s|[.,!?])|(?:от|с|>=|>|дороже|не\s+дешевле|до|<=|<|меньше|дешевле|не\s+дороже|бюджет(?:ом)?|цена\s+до|стоимость\s+до)\s*\d+(?:[\s.,]\d+)*|\b[1-9]\d{5,7}\b/gi;
+    const number = String.raw`\d+(?:[.,]\d+)?(?:\s?\d{3})*`;
+    return new RegExp(String.raw`(?:от|с|>=|>|дороже|не\s+дешевле|до|<=|<|меньше|дешевле|не\s+дороже|бюджет(?:ом)?|цена\s+до|стоимость\s+до)?\s*${number}\s*(?:млн|мил(?:лион(?:а|ов)?)?|m|м|тыс(?:яч)?|тр|к|k)(?=$|\s|[.,!?])|(?:от|с|>=|>|дороже|не\s+дешевле|до|<=|<|меньше|дешевле|не\s+дороже|бюджет(?:ом)?|цена\s+до|стоимость\s+до)\s*${number}|\b[1-9]\d{5,7}\b`, "gi");
   }
 
   function getYearTokenPattern() {
@@ -395,12 +415,12 @@
   }
 
   function getPriceRangePattern() {
-    const number = String.raw`\d+(?:[\s.,]\d+)*`;
+    const number = String.raw`\d+(?:[.,]\d+)?(?:\s?\d{3})*`;
     const decimalNumber = String.raw`\d+[.,]\d+`;
     const unit = String.raw`(?:млн|мил(?:лион(?:а|ов)?)?|m|м|тыс(?:яч)?|тр|к|k)?`;
     const context = String.raw`(?:в\s+пределах|диапазон|бюджет|цена|стоимость|между)`;
     const approx = String.raw`(?:около|примерно|плюс\s*минус|в\s+районе|район|ориентир|ориентировочно)`;
-    return new RegExp(String.raw`${approx}\s*${number}\s*${unit}|${decimalNumber}\s*(?:-|—|–|до)\s*${decimalNumber}\s*(?:млн|мил(?:лион(?:а|ов)?)?|m|м)?|(?:(?:${context})\s*(?:от|с)?|(?:от|с))\s*${number}\s*${unit}\s*(?:-|—|–|до|и)\s*${number}\s*${unit}|(?:от|с|>=|>|дороже|не\s+дешевле|хотя\s+бы|минимум)\s*${number}\s*${unit}`, "gi");
+    return new RegExp(String.raw`${approx}\s*${number}\s*${unit}|${decimalNumber}\s*(?:-|—|–|до)\s*${decimalNumber}\s*(?:млн|мил(?:лион(?:а|ов)?)?|m|м)?(?!\s*(?:л|литр|l))|(?:(?:${context})\s*(?:от|с)?|(?:от|с))\s*${number}\s*${unit}\s*(?:-|—|–|до|и)\s*${number}\s*${unit}|(?:от|с|>=|>|дороже|не\s+дешевле|хотя\s+бы|минимум)\s*${number}\s*${unit}`, "gi");
   }
 
   function extractBudget(rawQuery) {
@@ -423,7 +443,7 @@
   }
 
   function findBudgetApprox(text) {
-    const match = text.match(/(?:около|примерно|плюс\s*минус|в\s+районе|район|ориентир|ориентировочно)\s*(\d+(?:[\s.,]\d+)*)\s*(млн|мил(?:лион(?:а|ов)?)?|m|м|тыс(?:яч)?|тр|к|k)?/i);
+    const match = text.match(/(?:около|примерно|плюс\s*минус|в\s+районе|район|ориентир|ориентировочно)\s*(\d+(?:[.,]\d+)?(?:\s?\d{3})*)\s*(млн|мил(?:лион(?:а|ов)?)?|m|м|тыс(?:яч)?|тр|к|k)?/i);
     if (!match) return null;
     const value = parseBudgetValue(`${match[1]} ${match[2] || ""}`);
     if (value < 50000 || value > 50000000) return null;
@@ -432,17 +452,18 @@
   }
 
   function findBudgetRange(text) {
-    const decimalRange = text.match(/(?:^|\s)(\d+[.,]\d+)\s*(?:-|—|–|до)\s*(\d+[.,]\d+)(?:\s*(млн|мил(?:лион(?:а|ов)?)?|m|м))?(?=\s|$)/i);
+    const decimalRange = text.match(/(?:^|\s)(\d+[.,]\d+)\s*(?:-|—|–|до)\s*(\d+[.,]\d+)(?:\s*(млн|мил(?:лион(?:а|ов)?)?|m|м))?(?!\s*(?:л|литр|l))(?=\s|$)/i);
     if (decimalRange) {
       const first = parseBudgetValue(`${decimalRange[1]} ${decimalRange[3] || ""}`);
       const second = parseBudgetValue(`${decimalRange[2]} ${decimalRange[3] || ""}`);
+      if (!decimalRange[3] && Number(decimalRange[1].replace(",", ".")) > Number(decimalRange[2].replace(",", "."))) return null;
       const min = Math.min(first, second);
       const max = Math.max(first, second);
       if (min >= 50000 && max <= 50000000 && min <= max) return { min, max };
     }
 
     const context = String.raw`(?:в\s+пределах|диапазон|бюджет|цена|стоимость|между)`;
-    const number = String.raw`(\d+(?:[\s.,]\d+)*)\s*(млн|мил(?:лион(?:а|ов)?)?|m|м|тыс(?:яч)?|тр|к|k)?`;
+    const number = String.raw`(\d+(?:[.,]\d+)?(?:\s?\d{3})*)\s*(млн|мил(?:лион(?:а|ов)?)?|m|м|тыс(?:яч)?|тр|к|k)?`;
     const patterns = [
       new RegExp(String.raw`(?:от|с)\s*${number}\s*(?:-|—|–|до|и)\s*${number}`, "i"),
       new RegExp(String.raw`${context}\s*(?:от|с)?\s*${number}\s*(?:-|—|–|до|и)\s*${number}`, "i")
@@ -460,7 +481,7 @@
   }
 
   function findBudgetMin(text) {
-    const match = text.match(/(?:от|с|>=|>|дороже|не\s+дешевле|хотя\s+бы|минимум)\s*(\d+(?:[\s.,]\d+)*)\s*(млн|мил(?:лион(?:а|ов)?)?|m|м|тыс(?:яч)?|тр|к|k)?/i);
+    const match = text.match(/(?:от|с|>=|>|дороже|не\s+дешевле|хотя\s+бы|минимум)\s*(\d+(?:[.,]\d+)?(?:\s?\d{3})*)\s*(млн|мил(?:лион(?:а|ов)?)?|m|м|тыс(?:яч)?|тр|к|k)?/i);
     if (!match) return null;
     const value = parseBudgetValue(`${match[1]} ${match[2] || ""}`);
     return value >= 50000 && value <= 50000000 ? value : null;
@@ -475,6 +496,21 @@
     const powerNumber = String.raw`\d{2,4}`;
     const direction = String.raw`от|>=|>|больше|мощнее|свыше|не\s+меньше|до|<=|<|меньше|слабее|не\s+более|не\s+выше`;
     return new RegExp(String.raw`(?:мощн(?:ость|остью)?|лош(?:ад(?:ей|и|ок)?)?|л\.?\s*с\.?|hp|horsepower)\s*(?:${direction})?\s*${powerNumber}|(?:${direction})?\s*${powerNumber}\s*(?:лош(?:ад(?:ей|и|ок)?)?|л\.?\s*с\.?|hp|horsepower)`, "gi");
+  }
+
+  function getEngineNumberPattern() {
+    return String.raw`\d(?:[.,]\d)?`;
+  }
+
+  function getEngineRangePattern() {
+    const number = getEngineNumberPattern();
+    return new RegExp(String.raw`(?:двиг(?:атель)?|движок|мотор|объем|объём)?\s*${number}\s*(?:л|литр(?:а|ов)?|l)?\s*(?:-|—|–|до)\s*${number}\s*(?:л|литр(?:а|ов)?|l)`, "gi");
+  }
+
+  function getEnginePattern() {
+    const number = getEngineNumberPattern();
+    const direction = String.raw`от|>=|>|больше|свыше|не\s+меньше|до|<=|<|меньше|не\s+более|не\s+выше`;
+    return new RegExp(String.raw`(?:двиг(?:атель)?|движок|мотор|объем|объём)\s*(?:${direction})?\s*${number}\s*(?:л|литр(?:а|ов)?|l)?|(?:${direction})?\s*${number}\s*(?:л|литр(?:а|ов)?|l)`, "gi");
   }
 
   function extractMileage(rawQuery) {
@@ -497,6 +533,53 @@
       })
       .filter((item) => item && item.value >= 1 && item.value <= 2000);
     return powers.length ? powers[powers.length - 1] : null;
+  }
+
+  function extractEngine(rawQuery) {
+    const text = String(rawQuery || "").toLowerCase().replace(/ё/g, "е");
+    const rangeMatch = text.match(getEngineRangePattern());
+    if (rangeMatch) {
+      const values = Array.from(rangeMatch[rangeMatch.length - 1].matchAll(/\d(?:[.,]\d)?/g))
+        .map((match) => parseEngineValue(match[0]))
+        .filter(Boolean);
+      if (values.length >= 2) return { min: Math.min(values[0], values[1]), max: Math.max(values[0], values[1]) };
+    }
+
+    const matches = Array.from(text.matchAll(getEnginePattern()));
+    const engines = matches
+      .map((match) => {
+        const value = parseEngineValue(match[0]);
+        if (!value) return null;
+        return { value, mode: parseEngineMode(match[0]) };
+      })
+      .filter((item) => item && item.value >= 0.5 && item.value <= 8);
+    return engines.length ? engines[engines.length - 1] : null;
+  }
+
+  function extractEngineBeforeBudget(rawQuery) {
+    const text = String(rawQuery || "").toLowerCase().replace(/ё/g, "е");
+    const match = text.match(/(?:^|\s)(\d[.,]\d)\s*(?:до|<=|<|дешевле|не\s+дороже)\s*(\d+(?:[.,]\d+)?(?:\s?\d{3})*)/i);
+    if (!match) return null;
+    const engineValue = parseEngineValue(match[1]);
+    const possibleBudgetValue = parseBudgetValue(match[2]);
+    if (engineValue >= 0.5 && engineValue <= 8 && possibleBudgetValue >= 50000 && engineValue > Number(String(match[2]).replace(",", "."))) {
+      return { value: engineValue, mode: "near" };
+    }
+    return null;
+  }
+
+  function parseEngineValue(fragment) {
+    const match = String(fragment || "").match(/\d(?:[.,]\d)?/);
+    if (!match) return 0;
+    const value = Number(match[0].replace(",", "."));
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  function parseEngineMode(fragment) {
+    const text = String(fragment || "").toLowerCase().replace(/ё/g, "е");
+    if (/(?:до|<=|<|меньше|не\s+более|не\s+выше)/.test(text)) return "max";
+    if (/(?:от|>=|>|больше|свыше|не\s+меньше)/.test(text)) return "min";
+    return "near";
   }
 
   function parsePowerValue(fragment) {
@@ -629,6 +712,7 @@
     if (parsed.budget && car.price > parsed.budget) return -1;
     if (parsed.mileage && parseMileageField(car.mileage) > parsed.mileage) return -1;
     if (parsed.power && !powerMatches(car.power, parsed.power)) return -1;
+    if (parsed.engine && !engineMatches(car.engine, parsed.engine)) return -1;
     if (parsed.transmission && !transmissionMatches(car.transmission, parsed.transmission)) return -1;
     if (parsed.drive && !driveMatches(car.drive, parsed.drive)) return -1;
     if (parsed.wheel && !wheelMatches(car.wheel, parsed.wheel)) return -1;
@@ -645,6 +729,7 @@
     if (parsed.yearRange) score += 3;
     if (parsed.mileage && car.mileage) score += Math.max(0, 3 - Math.floor((parsed.mileage - parseMileageField(car.mileage)) / 30000));
     if (parsed.power) score += 2;
+    if (parsed.engine) score += 2;
     if (parsed.wheel) score += 2;
     if (parsed.fuel) score += 2;
     if (parsed.bodyTypes?.length) score += 2;
@@ -683,6 +768,11 @@
     return text ? Number(text) : 0;
   }
 
+  function parseEngineField(value) {
+    const match = String(value || "").replace(",", ".").match(/\d(?:\.\d)?/);
+    return match ? Number(match[0]) : 0;
+  }
+
   function parseCarYear(value) {
     const match = String(value || "").match(/\d{4}/);
     return match ? Number(match[0]) : 0;
@@ -701,6 +791,16 @@
     if (requested.mode === "min") return power >= requested.value;
     const tolerance = Math.max(15, Math.round(requested.value * 0.1));
     return power >= requested.value - tolerance && power <= requested.value + tolerance;
+  }
+
+  function engineMatches(value, requested) {
+    const engine = parseEngineField(value);
+    if (!engine) return false;
+    if (requested.min && requested.max) return engine >= requested.min && engine <= requested.max;
+    if (requested.mode === "max") return engine <= requested.value;
+    if (requested.mode === "min") return engine >= requested.value;
+    const tolerance = Math.max(0.12, requested.value * 0.08);
+    return engine >= requested.value - tolerance && engine <= requested.value + tolerance;
   }
 
   function transmissionMatches(value, requested) {
@@ -806,6 +906,7 @@
       year_range: parsed.yearRange || null,
       mileage: parsed.mileage || null,
       power: parsed.power || null,
+      engine: parsed.engine || null,
       drive: parsed.drive || "",
       wheel: parsed.wheel || "",
       fuel: parsed.fuel || "",
@@ -822,6 +923,7 @@
     if (parsed.budget || parsed.budgetMin) chips.push(`<span class="chip">${escapeHtml(formatBudgetChip(parsed.budgetMin, parsed.budget))}</span>`);
     if (parsed.mileage) chips.push(`<span class="chip">пробег до ${formatMileage(parsed.mileage)}</span>`);
     if (parsed.power) chips.push(`<span class="chip">${formatPowerChip(parsed.power)}</span>`);
+    if (parsed.engine) chips.push(`<span class="chip">${escapeHtml(formatEngineChip(parsed.engine))}</span>`);
     if (parsed.drive) chips.push(`<span class="chip">${escapeHtml(parsed.drive)} привод</span>`);
     if (parsed.wheel) chips.push(`<span class="chip">${escapeHtml(parsed.wheel)} руль</span>`);
     if (parsed.fuel) chips.push(`<span class="chip">${escapeHtml(parsed.fuel)}</span>`);
